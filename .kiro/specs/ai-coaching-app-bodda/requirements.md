@@ -95,3 +95,16 @@ Bodda is an AI-powered running and cycling coach application that integrates wit
 2. WHEN displaying content THEN the system SHALL use sufficient contrast and spacing for comfortable reading
 3. WHEN users navigate the application THEN the system SHALL provide intuitive routing between the landing page and session pages
 4. WHEN the interface loads THEN the system SHALL be responsive and work well on different screen sizes
+
+### Requirement 9
+
+**User Story:** As an AI coach, I want to perform multi-turn iterative tool calls within a single coaching session, so that I can gather comprehensive data and provide more sophisticated analysis based on progressive insights.
+
+#### Acceptance Criteria
+
+1. WHEN the AI needs to gather complex information THEN the system SHALL allow multiple rounds of tool calls within a single response
+2. WHEN the AI receives tool results THEN the system SHALL allow the AI to make additional tool calls based on the new information
+3. WHEN performing iterative tool calls THEN the system SHALL maintain context across all tool call rounds
+4. WHEN multiple tool call rounds are needed THEN the system SHALL stream intermediate progress updates to the user
+5. WHEN iterative tool calls exceed reasonable limits THEN the system SHALL prevent infinite loops with appropriate safeguards
+6. WHEN tool calls fail during iteration THEN the system SHALL handle errors gracefully and continue with available data

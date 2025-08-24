@@ -34,6 +34,108 @@ type ToolResult struct {
 	Data       interface{} `json:"data,omitempty"`
 }
 
+// IterativeProcessor manages multiple rounds of data analysis and tool execution
+type IterativeProcessor struct {
+	MaxRounds        int                            // Maximum tool call rounds (default: 5)
+	CurrentRound     int                            // Current analysis round
+	ProgressCallback func(string)                   // Stream progress updates
+	ToolResults      [][]ToolResult                 // Results from each round
+	Context          *MessageContext                // Persistent context
+	Messages         []openai.ChatCompletionMessage // Accumulated conversation context
+}
+
+// NewIterativeProcessor creates a new iterative processor with default settings
+func NewIterativeProcessor(msgCtx *MessageContext, progressCallback func(string)) *IterativeProcessor {
+	return &IterativeProcessor{
+		MaxRounds:        5,
+		CurrentRound:     0,
+		ProgressCallback: progressCallback,
+		ToolResults:      make([][]ToolResult, 0),
+		Context:          msgCtx,
+		Messages:         make([]openai.ChatCompletionMessage, 0),
+	}
+}
+
+// ProgressUpdate represents a coaching-focused progress message
+type ProgressUpdate struct {
+	Message string `json:"message"`
+	Round   int    `json:"round"`
+}
+
+// GetProgressMessage returns a coaching-focused progress message for the current round
+func (ip *IterativeProcessor) GetProgressMessage() string {
+	roundMessages := [][]string{
+		// Round 0 - Initial exploration
+		{
+			"Let me start by understanding your training background...",
+			"Getting familiar with your athletic profile...",
+			"Beginning to review your training data...",
+		},
+		// Round 1 - Activity review
+		{
+			"Now looking at your recent training activities...",
+			"Reviewing what you've been working on lately...",
+			"Checking out your recent workout history...",
+		},
+		// Round 2 - Pattern analysis
+		{
+			"Analyzing patterns in your training approach...",
+			"Looking for trends in your workout data...",
+			"Examining how your training has been progressing...",
+		},
+		// Round 3 - Detailed insights
+		{
+			"Diving deeper into your performance metrics...",
+			"Gathering detailed insights about your training...",
+			"Analyzing the specifics of your workout data...",
+		},
+		// Round 4+ - Final synthesis
+		{
+			"Putting together my comprehensive analysis...",
+			"Finalizing my review of your training data...",
+			"Preparing personalized recommendations for you...",
+		},
+	}
+
+	roundIndex := ip.CurrentRound
+	if roundIndex >= len(roundMessages) {
+		roundIndex = len(roundMessages) - 1
+	}
+
+	// Use current time for simple randomization
+	messages := roundMessages[roundIndex]
+	index := int(time.Now().UnixNano()) % len(messages)
+	return messages[index]
+}
+
+// ShouldContinue determines if another round of analysis should be performed
+func (ip *IterativeProcessor) ShouldContinue(hasToolCalls bool) bool {
+	if !hasToolCalls {
+		return false
+	}
+
+	if ip.CurrentRound >= ip.MaxRounds {
+		return false
+	}
+
+	return true
+}
+
+// AddToolResults adds tool results for the current round and increments the round counter
+func (ip *IterativeProcessor) AddToolResults(results []ToolResult) {
+	ip.ToolResults = append(ip.ToolResults, results)
+	ip.CurrentRound++
+}
+
+// GetTotalToolCalls returns the total number of tool calls across all rounds
+func (ip *IterativeProcessor) GetTotalToolCalls() int {
+	total := 0
+	for _, roundResults := range ip.ToolResults {
+		total += len(roundResults)
+	}
+	return total
+}
+
 // Custom error types for AI service
 var (
 	ErrOpenAIUnavailable   = errors.New("OpenAI service is currently unavailable")
@@ -75,145 +177,34 @@ func (s *aiService) ProcessMessage(ctx context.Context, msgCtx *MessageContext) 
 		return nil, err
 	}
 
-	messages := s.prepareMessages(msgCtx)
-	tools := s.getAvailableTools()
-
-	req := openai.ChatCompletionRequest{
-		Model:    openai.GPT4o,
-		Messages: messages,
-		Tools:    tools,
-		Stream:   true,
-		// Temperature: 0.7,
-		// MaxTokens:   2000,
-	}
-
-	stream, err := s.client.CreateChatCompletionStream(ctx, req)
-	if err != nil {
-		return nil, s.handleOpenAIError(err)
-	}
-
 	responseChan := make(chan string, 100)
+
+	// Create iterative processor with progress callback
+	processor := NewIterativeProcessor(msgCtx, func(message string) {
+		responseChan <- message
+	})
 
 	go func() {
 		defer close(responseChan)
-		defer stream.Close()
 
-		var toolCalls []openai.ToolCall
-		var currentToolCall *openai.ToolCall
-		var responseContent strings.Builder
-
-		for {
-			response, err := stream.Recv()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-
-				// Handle streaming errors gracefully
-				aiErr := s.handleOpenAIError(err)
-				if errors.Is(aiErr, ErrOpenAIUnavailable) {
-					responseChan <- s.getFallbackResponse("I'm experiencing technical difficulties right now. Please try again in a moment.")
-				} else {
-					responseChan <- fmt.Sprintf("I encountered an error while processing your message: %v. Please try again.", aiErr)
-				}
-				return
-			}
-
-			if len(response.Choices) == 0 {
-				continue
-			}
-
-			delta := response.Choices[0].Delta
-
-			// Handle content streaming
-			if delta.Content != "" {
-				responseContent.WriteString(delta.Content)
-				responseChan <- delta.Content
-			}
-
-			// Handle tool calls
-			if len(delta.ToolCalls) > 0 {
-				for _, toolCall := range delta.ToolCalls {
-					if toolCall.Index != nil {
-						// New tool call or existing one
-						for len(toolCalls) <= *toolCall.Index {
-							toolCalls = append(toolCalls, openai.ToolCall{})
-						}
-						currentToolCall = &toolCalls[*toolCall.Index]
-
-						if toolCall.ID != "" {
-							currentToolCall.ID = toolCall.ID
-						}
-						if toolCall.Type != "" {
-							currentToolCall.Type = toolCall.Type
-						}
-						if toolCall.Function.Name != "" {
-							currentToolCall.Function.Name = toolCall.Function.Name
-						}
-					}
-
-					if currentToolCall != nil && toolCall.Function.Arguments != "" {
-						currentToolCall.Function.Arguments += toolCall.Function.Arguments
-					}
-				}
-			}
-		}
-
-		// Process tool calls if any
-		if len(toolCalls) > 0 {
-			toolResults, err := s.executeTools(ctx, msgCtx, toolCalls)
-			if err != nil {
-				responseChan <- fmt.Sprintf("Error executing tools: %v", err)
-				return
-			}
-
-			// Create follow-up request with tool results
-			followUpMessages := append(messages, openai.ChatCompletionMessage{
-				Role:      openai.ChatMessageRoleAssistant,
-				Content:   responseContent.String(),
-				ToolCalls: toolCalls,
-			})
-
-			// Add tool results as messages
-			for _, result := range toolResults {
-				followUpMessages = append(followUpMessages, openai.ChatCompletionMessage{
-					Role:       openai.ChatMessageRoleTool,
-					Content:    result.Content,
-					ToolCallID: result.ToolCallID,
+		// Process message with iterative tool calling
+		err := s.processIterativeToolCalls(ctx, processor, responseChan)
+		if err != nil {
+			aiErr := s.handleOpenAIError(err)
+			if errors.Is(aiErr, ErrOpenAIUnavailable) {
+				message := s.getRandomMessage([]string{
+					"I'm having some difficulties right now. Please give me a moment and try your question again.",
+					"I'm experiencing some connectivity issues at the moment. Please try reaching out again in a few minutes.",
+					"There's a hiccup on my end right now. Please try your question again shortly.",
 				})
-			}
-
-			// Make follow-up request
-			followUpReq := openai.ChatCompletionRequest{
-				Model:    openai.GPT4o,
-				Messages: followUpMessages,
-				Stream:   true,
-				// Temperature: 0.7,
-				// MaxTokens:   2000,
-			}
-
-			followUpStream, err := s.client.CreateChatCompletionStream(ctx, followUpReq)
-			if err != nil {
-				aiErr := s.handleOpenAIError(err)
-				responseChan <- fmt.Sprintf("I encountered an error while processing the tool results: %v. Please try again.", aiErr)
-				return
-			}
-			defer followUpStream.Close()
-
-			for {
-				response, err := followUpStream.Recv()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					aiErr := s.handleOpenAIError(err)
-					responseChan <- fmt.Sprintf("Error during response generation: %v", aiErr)
-					return
-				}
-
-				if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
-					responseChan <- response.Choices[0].Delta.Content
-				}
+				responseChan <- message
+			} else {
+				message := s.getRandomMessage([]string{
+					"I ran into an issue while analyzing your training data. Please try your question again.",
+					"Something went wrong while I was processing your request. Please give it another try.",
+					"I encountered a problem while working on your question. Please try asking again.",
+				})
+				responseChan <- message
 			}
 		}
 	}()
@@ -333,7 +324,7 @@ func (s *aiService) prepareMessages(msgCtx *MessageContext) []openai.ChatComplet
 
 // buildSystemPrompt creates the system prompt with athlete logbook context
 func (s *aiService) buildSystemPrompt(msgCtx *MessageContext) string {
-	basePrompt := `You are Bodda, an AI-powered running and/or cycling coach. You provide personalized coaching advice based on the athlete's Strava data and logbook information.
+	basePrompt := `You are Bodda, an AI-powered running and cycling coach. You provide personalized coaching advice based on the athlete's Strava data and logbook information.
 
 Your capabilities include:
 - Analyzing Strava activity data (profile, recent activities, detailed activity information, and activity streams)
@@ -470,6 +461,585 @@ func (s *aiService) getAvailableTools() []openai.Tool {
 			},
 		},
 	}
+}
+
+// processIterativeToolCalls handles multi-turn tool calling with progress streaming
+func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *IterativeProcessor, responseChan chan<- string) error {
+	// Prepare initial messages with accumulated context
+	processor.Messages = s.buildConversationContext(processor.Context)
+	tools := s.getAvailableTools()
+
+	for {
+		// Create chat completion request with enhanced context
+		req := openai.ChatCompletionRequest{
+			Model:       openai.GPT4o,
+			Messages:    processor.Messages,
+			Tools:       tools,
+			Stream:      true,
+			Temperature: 0.7,
+		}
+
+		stream, err := s.client.CreateChatCompletionStream(ctx, req)
+		if err != nil {
+			return s.handleStreamingError(err, processor, responseChan)
+		}
+
+		var toolCalls []openai.ToolCall
+		var currentToolCall *openai.ToolCall
+		var responseContent strings.Builder
+		var hasContent bool
+
+		// Process streaming response with enhanced error handling
+		for {
+			response, err := stream.Recv()
+			if err != nil {
+				stream.Close()
+				if err == io.EOF {
+					break
+				}
+				return s.handleStreamingError(err, processor, responseChan)
+			}
+
+			if len(response.Choices) == 0 {
+				continue
+			}
+
+			delta := response.Choices[0].Delta
+
+			// Handle content streaming
+			if delta.Content != "" {
+				responseContent.WriteString(delta.Content)
+				responseChan <- delta.Content
+				hasContent = true
+			}
+
+			// Handle tool calls with improved parsing
+			if len(delta.ToolCalls) > 0 {
+				toolCalls = s.parseToolCallsFromDelta(delta.ToolCalls, toolCalls, &currentToolCall)
+			}
+		}
+
+		stream.Close()
+
+		// Determine next action based on tool calls and analysis depth
+		if len(toolCalls) > 0 {
+			// Check if we should continue with another round of analysis
+			shouldContinue, reason := s.shouldContinueAnalysis(processor, toolCalls, hasContent)
+			if !shouldContinue {
+				// Provide final response based on accumulated insights
+				finalResponse := s.generateFinalResponse(processor, reason, hasContent)
+				if finalResponse != "" {
+					responseChan <- finalResponse
+				}
+				break
+			}
+
+			// Stream natural progress update
+			progressMsg := s.getCoachingProgressMessage(processor, toolCalls)
+			responseChan <- fmt.Sprintf("\n\n*%s*\n\n", progressMsg)
+
+			// Execute tools with enhanced error handling
+			toolResults, err := s.executeToolsWithRecovery(ctx, processor.Context, toolCalls)
+			if err != nil {
+				return s.handleToolExecutionError(err, processor, responseChan)
+			}
+
+			// Build enhanced conversation context with accumulated insights
+			processor = s.accumulateAnalysisContext(processor, toolCalls, toolResults, responseContent.String())
+
+			// Continue to next iteration with enhanced context
+			continue
+		}
+
+		// No tool calls, analysis complete
+		break
+	}
+
+	return nil
+}
+
+// buildConversationContext creates enhanced conversation context with accumulated insights
+func (s *aiService) buildConversationContext(msgCtx *MessageContext) []openai.ChatCompletionMessage {
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: s.buildEnhancedSystemPrompt(msgCtx),
+		},
+	}
+
+	// Add conversation history with context preservation
+	for _, msg := range msgCtx.ConversationHistory {
+		role := openai.ChatMessageRoleUser
+		if msg.Role == "assistant" {
+			role = openai.ChatMessageRoleAssistant
+		}
+
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    role,
+			Content: msg.Content,
+		})
+	}
+
+	// Add current message with analysis context
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: msgCtx.Message,
+	})
+
+	return messages
+}
+
+// buildEnhancedSystemPrompt creates system prompt with iterative analysis guidance
+func (s *aiService) buildEnhancedSystemPrompt(msgCtx *MessageContext) string {
+	basePrompt := `You are Bodda, an AI-powered running and cycling coach. You provide personalized coaching advice based on comprehensive analysis of the athlete's Strava data and logbook information.
+
+Your analytical approach:
+- Gather comprehensive data through multiple rounds of tool calls when needed
+- Build insights progressively, using each round of data to inform the next
+- Determine when you have sufficient information to provide valuable coaching advice
+- Focus on actionable, personalized recommendations based on the athlete's specific data
+
+Your capabilities include:
+- Analyzing Strava activity data (profile, recent activities, detailed activity information, and activity streams)
+- Maintaining and updating athlete logbooks with training insights
+- Providing personalized coaching recommendations based on comprehensive data analysis
+- Helping with training plans, performance analysis, and goal setting
+
+Guidelines for iterative analysis:
+- Use multiple rounds of data gathering when the athlete's question requires comprehensive analysis
+- Start with broad data (profile, recent activities) then drill down to specific details as needed
+- Each round of tool calls should build upon insights from previous rounds
+- Update the athlete logbook when you discover new insights about their training patterns
+- Provide natural progress updates during comprehensive analysis
+- Stop gathering data when you have sufficient information to answer the athlete's question effectively
+
+Guidelines for coaching:
+- Always be encouraging and supportive
+- Base your advice on data when available
+- Ask clarifying questions when you need more information
+- Be specific in your recommendations and explain your reasoning
+- Consider the athlete's goals, experience level, and current fitness when giving advice
+
+Available tools:
+- get-athlete-profile: Get complete Strava athlete profile
+- get-recent-activities: Get recent activities (configurable count)
+- get-activity-details: Get detailed information about a specific activity
+- get-activity-streams: Get time-series data from an activity (heart rate, power, etc.)
+- update-athlete-logbook: Update the athlete's logbook with new information`
+
+	// Add athlete logbook context if available
+	if msgCtx.AthleteLogbook != nil && msgCtx.AthleteLogbook.Content != "" {
+		basePrompt += fmt.Sprintf("\n\nCurrent Athlete Logbook:\n%s", msgCtx.AthleteLogbook.Content)
+	} else {
+		basePrompt += "\n\nNo athlete logbook exists yet. You should create one using the update-athlete-logbook tool when you learn about the athlete."
+	}
+
+	return basePrompt
+}
+
+// shouldContinueAnalysis determines if another round of analysis should be performed
+func (s *aiService) shouldContinueAnalysis(processor *IterativeProcessor, toolCalls []openai.ToolCall, hasContent bool) (bool, string) {
+	// Don't continue if no tool calls
+	if len(toolCalls) == 0 {
+		return false, "no_tools"
+	}
+
+	// Don't continue if max rounds reached
+	if processor.CurrentRound >= processor.MaxRounds {
+		return false, "max_rounds"
+	}
+
+	// Analyze the nature of tool calls to determine if more analysis is beneficial
+	analysisDepth := s.assessAnalysisDepth(processor, toolCalls)
+
+	// Continue if we're still in exploratory phase and haven't reached sufficient depth
+	if analysisDepth < 3 && processor.CurrentRound < processor.MaxRounds-1 {
+		return true, "continue_analysis"
+	}
+
+	// Continue if tool calls suggest deeper analysis is needed
+	if s.toolCallsSuggestDeeperAnalysis(toolCalls) && processor.CurrentRound < processor.MaxRounds-1 {
+		return true, "deeper_analysis"
+	}
+
+	return false, "sufficient_data"
+}
+
+// assessAnalysisDepth evaluates how deep the current analysis has gone
+func (s *aiService) assessAnalysisDepth(processor *IterativeProcessor, toolCalls []openai.ToolCall) int {
+	depth := 0
+
+	// Count different types of analysis performed
+	hasProfile := false
+	hasActivities := false
+	hasDetails := false
+	hasStreams := false
+
+	// Check current round
+	for _, call := range toolCalls {
+		switch call.Function.Name {
+		case "get-athlete-profile":
+			hasProfile = true
+		case "get-recent-activities":
+			hasActivities = true
+		case "get-activity-details":
+			hasDetails = true
+		case "get-activity-streams":
+			hasStreams = true
+		}
+	}
+
+	// Check previous rounds
+	for _, roundResults := range processor.ToolResults {
+		for _, result := range roundResults {
+			if result.Error == "" {
+				switch {
+				case strings.Contains(result.Content, "firstname") || strings.Contains(result.Content, "ftp"):
+					hasProfile = true
+				case strings.Contains(result.Content, "activities") && strings.Contains(result.Content, "distance"):
+					hasActivities = true
+				case strings.Contains(result.Content, "description") || strings.Contains(result.Content, "calories"):
+					hasDetails = true
+				case strings.Contains(result.Content, "heartrate") || strings.Contains(result.Content, "watts"):
+					hasStreams = true
+				}
+			}
+		}
+	}
+
+	if hasProfile {
+		depth++
+	}
+	if hasActivities {
+		depth++
+	}
+	if hasDetails {
+		depth++
+	}
+	if hasStreams {
+		depth++
+	}
+
+	return depth
+}
+
+// toolCallsSuggestDeeperAnalysis checks if current tool calls indicate need for deeper analysis
+func (s *aiService) toolCallsSuggestDeeperAnalysis(toolCalls []openai.ToolCall) bool {
+	for _, call := range toolCalls {
+		// If we're getting activity details or streams, we're doing deep analysis
+		if call.Function.Name == "get-activity-details" || call.Function.Name == "get-activity-streams" {
+			return true
+		}
+	}
+	return false
+}
+
+// getCoachingProgressMessage returns natural coaching-focused progress messages
+func (s *aiService) getCoachingProgressMessage(processor *IterativeProcessor, toolCalls []openai.ToolCall) string {
+	// Determine message based on tool calls and current context
+	if len(toolCalls) > 0 {
+		return s.getContextualProgressMessage(processor, toolCalls)
+	}
+
+	// Fallback to round-based messages with coaching tone
+	return s.getRoundBasedProgressMessage(processor)
+}
+
+// getContextualProgressMessage returns progress messages based on specific tool calls
+func (s *aiService) getContextualProgressMessage(processor *IterativeProcessor, toolCalls []openai.ToolCall) string {
+	// Analyze the combination of tool calls to provide contextual messages
+	hasProfile := false
+	hasActivities := false
+	hasDetails := false
+	hasStreams := false
+	hasLogbookUpdate := false
+
+	for _, toolCall := range toolCalls {
+		switch toolCall.Function.Name {
+		case "get-athlete-profile":
+			hasProfile = true
+		case "get-recent-activities":
+			hasActivities = true
+		case "get-activity-details":
+			hasDetails = true
+		case "get-activity-streams":
+			hasStreams = true
+		case "update-athlete-logbook":
+			hasLogbookUpdate = true
+		}
+	}
+
+	// Provide contextual messages based on the combination of tools being used
+	if hasLogbookUpdate {
+		return s.getRandomMessage([]string{
+			"Updating your training insights with what I've learned...",
+			"Recording important observations about your training...",
+			"Adding new insights to your coaching profile...",
+		})
+	}
+
+	if hasStreams {
+		return s.getRandomMessage([]string{
+			"Diving deep into your workout data to understand your performance patterns...",
+			"Examining your heart rate and power data for detailed insights...",
+			"Looking at the fine details of your training metrics...",
+			"Analyzing your performance data to spot trends and opportunities...",
+		})
+	}
+
+	if hasDetails {
+		return s.getRandomMessage([]string{
+			"Taking a closer look at your specific workouts...",
+			"Examining the details of your recent training sessions...",
+			"Getting a better understanding of your workout structure...",
+			"Reviewing the specifics of your training efforts...",
+		})
+	}
+
+	if hasActivities {
+		if processor.CurrentRound == 0 {
+			return s.getRandomMessage([]string{
+				"Reviewing your recent training activities...",
+				"Looking at your recent workouts to understand your current training...",
+				"Checking out what you've been up to in your training lately...",
+				"Getting familiar with your recent training sessions...",
+			})
+		} else {
+			return s.getRandomMessage([]string{
+				"Gathering more details about your training history...",
+				"Looking at additional activities to get the full picture...",
+				"Expanding my view of your training patterns...",
+			})
+		}
+	}
+
+	if hasProfile {
+		return s.getRandomMessage([]string{
+			"Getting to know you better as an athlete...",
+			"Learning about your training background and preferences...",
+			"Understanding your athletic profile and goals...",
+			"Familiarizing myself with your training setup...",
+		})
+	}
+
+	// Default contextual message
+	return s.getRoundBasedProgressMessage(processor)
+}
+
+// getRoundBasedProgressMessage provides round-based progress messages with coaching tone
+func (s *aiService) getRoundBasedProgressMessage(processor *IterativeProcessor) string {
+	roundMessages := [][]string{
+		// Round 0 - Initial analysis
+		{
+			"Let me take a look at your training data...",
+			"Starting to analyze your training information...",
+			"Beginning my review of your athletic data...",
+		},
+		// Round 1 - Deeper dive
+		{
+			"Digging deeper into your training patterns...",
+			"Looking for insights in your workout data...",
+			"Examining your training trends more closely...",
+		},
+		// Round 2 - Detailed analysis
+		{
+			"Analyzing the details to understand your performance...",
+			"Connecting the dots in your training data...",
+			"Piecing together your training story...",
+		},
+		// Round 3 - Advanced insights
+		{
+			"Uncovering deeper insights about your training...",
+			"Looking at the bigger picture of your athletic development...",
+			"Finding patterns that will help optimize your training...",
+		},
+		// Round 4+ - Final analysis
+		{
+			"Putting together my final analysis...",
+			"Synthesizing everything I've learned about your training...",
+			"Preparing comprehensive recommendations based on your data...",
+		},
+	}
+
+	roundIndex := processor.CurrentRound
+	if roundIndex >= len(roundMessages) {
+		roundIndex = len(roundMessages) - 1
+	}
+
+	return s.getRandomMessage(roundMessages[roundIndex])
+}
+
+// getRandomMessage returns a random message from the provided slice
+func (s *aiService) getRandomMessage(messages []string) string {
+	if len(messages) == 0 {
+		return "Continuing my analysis..."
+	}
+
+	// Use current time as a simple randomization method
+	index := int(time.Now().UnixNano()) % len(messages)
+	return messages[index]
+}
+
+// generateFinalResponse creates appropriate final response based on analysis state
+func (s *aiService) generateFinalResponse(processor *IterativeProcessor, reason string, hasContent bool) string {
+	if hasContent {
+		// AI already provided some content, no need for additional response
+		return ""
+	}
+
+	switch reason {
+	case "max_rounds":
+		return s.getRandomMessage([]string{
+			"I've thoroughly reviewed your training data. Here's what I found and what I recommend:",
+			"After analyzing your training comprehensively, here are my insights and suggestions:",
+			"Based on my complete review of your training, here's my coaching advice:",
+		})
+	case "sufficient_data":
+		return s.getRandomMessage([]string{
+			"Perfect! I have everything I need. Here's my analysis and recommendations:",
+			"Great! Based on what I've learned about your training, here's what I suggest:",
+			"Excellent! I've got a clear picture now. Here are my coaching insights:",
+		})
+	case "no_tools":
+		return s.getRandomMessage([]string{
+			"Let me share my thoughts based on our conversation:",
+			"Here's my coaching perspective on what you've shared:",
+			"Based on what you've told me, here's what I think:",
+		})
+	default:
+		return s.getRandomMessage([]string{
+			"Here are my insights based on your training data:",
+			"Let me share what I've learned about your training:",
+			"Based on my analysis, here's my coaching advice:",
+		})
+	}
+}
+
+// executeToolsWithRecovery executes tools with enhanced error recovery
+func (s *aiService) executeToolsWithRecovery(ctx context.Context, msgCtx *MessageContext, toolCalls []openai.ToolCall) ([]ToolResult, error) {
+	results, err := s.executeTools(ctx, msgCtx, toolCalls)
+	if err != nil {
+		log.Printf("Tool execution error: %v", err)
+	}
+
+	// Filter and recover from partial failures
+	var successfulResults []ToolResult
+	var failedCount int
+
+	for _, result := range results {
+		if result.Error == "" {
+			successfulResults = append(successfulResults, result)
+		} else {
+			failedCount++
+			log.Printf("Tool call failed: %s - %s", result.ToolCallID, result.Error)
+		}
+	}
+
+	// If we have some successful results, continue with those
+	if len(successfulResults) > 0 {
+		if failedCount > 0 {
+			log.Printf("Continuing with %d successful results out of %d total", len(successfulResults), len(results))
+		}
+		return successfulResults, nil
+	}
+
+	// All tools failed
+	if err != nil {
+		return nil, fmt.Errorf("all tool calls failed: %w", err)
+	}
+
+	// If we reach here, all tools failed but executeTools didn't return an error
+	// This means all results have Error fields set
+	return nil, fmt.Errorf("all tool calls failed")
+}
+
+// accumulateAnalysisContext builds enhanced context with accumulated insights
+func (s *aiService) accumulateAnalysisContext(processor *IterativeProcessor, toolCalls []openai.ToolCall, toolResults []ToolResult, responseContent string) *IterativeProcessor {
+	// Add tool results to processor
+	processor.AddToolResults(toolResults)
+
+	// Add assistant message with tool calls to conversation
+	processor.Messages = append(processor.Messages, openai.ChatCompletionMessage{
+		Role:      openai.ChatMessageRoleAssistant,
+		Content:   responseContent,
+		ToolCalls: toolCalls,
+	})
+
+	// Add tool results as messages with enhanced context
+	for _, result := range toolResults {
+		processor.Messages = append(processor.Messages, openai.ChatCompletionMessage{
+			Role:       openai.ChatMessageRoleTool,
+			Content:    result.Content,
+			ToolCallID: result.ToolCallID,
+		})
+	}
+
+	return processor
+}
+
+// parseToolCallsFromDelta parses tool calls from streaming delta with improved handling
+func (s *aiService) parseToolCallsFromDelta(deltaToolCalls []openai.ToolCall, existingToolCalls []openai.ToolCall, currentToolCall **openai.ToolCall) []openai.ToolCall {
+	for _, toolCall := range deltaToolCalls {
+		if toolCall.Index != nil {
+			// New tool call or existing one
+			for len(existingToolCalls) <= *toolCall.Index {
+				existingToolCalls = append(existingToolCalls, openai.ToolCall{})
+			}
+			*currentToolCall = &existingToolCalls[*toolCall.Index]
+
+			if toolCall.ID != "" {
+				(*currentToolCall).ID = toolCall.ID
+			}
+			if toolCall.Type != "" {
+				(*currentToolCall).Type = toolCall.Type
+			}
+			if toolCall.Function.Name != "" {
+				(*currentToolCall).Function.Name = toolCall.Function.Name
+			}
+		}
+
+		if *currentToolCall != nil && toolCall.Function.Arguments != "" {
+			(*currentToolCall).Function.Arguments += toolCall.Function.Arguments
+		}
+	}
+	return existingToolCalls
+}
+
+// handleStreamingError handles streaming errors with appropriate recovery
+func (s *aiService) handleStreamingError(err error, processor *IterativeProcessor, responseChan chan<- string) error {
+	log.Printf("Streaming error in round %d: %v", processor.CurrentRound, err)
+
+	aiErr := s.handleOpenAIError(err)
+	if errors.Is(aiErr, ErrOpenAIUnavailable) {
+		message := s.getRandomMessage([]string{
+			"\n\nI'm having some difficulties right now. Let me work with what I've already learned about your training to give you some insights.",
+			"\n\nI'm experiencing some connectivity issues, but I can still help you based on the training data I've already reviewed.",
+			"\n\nThere's a hiccup on my end, but let me share what I've discovered about your training so far.",
+		})
+		responseChan <- message
+		return nil // Continue with partial analysis
+	}
+
+	return aiErr
+}
+
+// handleToolExecutionError handles tool execution errors during iterative analysis
+func (s *aiService) handleToolExecutionError(err error, processor *IterativeProcessor, responseChan chan<- string) error {
+	log.Printf("Tool execution error in round %d: %v", processor.CurrentRound, err)
+
+	// If we have some previous results, try to provide coaching based on that
+	if processor.GetTotalToolCalls() > 0 {
+		message := s.getRandomMessage([]string{
+			"\n\nI'm having trouble accessing some of your training data right now, but let me work with what I've already gathered to give you some helpful insights.",
+			"\n\nThere's an issue connecting to your training data at the moment, but I can still provide coaching advice based on what I've already reviewed.",
+			"\n\nI'm experiencing some difficulties accessing additional training information, but let me share recommendations based on the data I've already analyzed.",
+		})
+		responseChan <- message
+		return nil
+	}
+
+	// No previous data, return error
+	return fmt.Errorf("unable to gather training data: %w", err)
 }
 
 // executeTools executes the tool calls and returns the results

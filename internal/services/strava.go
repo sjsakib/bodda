@@ -148,6 +148,16 @@ type StravaPhoto struct {
 	URLs     map[string]string `json:"urls"`
 }
 
+// StravaStreamData represents a single stream's data structure
+type StravaStreamData struct {
+	Data       interface{} `json:"data"`
+	SeriesType string      `json:"series_type"`
+}
+
+// StravaStreamsResponse represents the raw response from Strava API when key_by_type=true
+type StravaStreamsResponse map[string]StravaStreamData
+
+// StravaStreams represents the parsed streams data in a more usable format
 type StravaStreams struct {
 	Time           []int       `json:"time,omitempty"`
 	Distance       []float64   `json:"distance,omitempty"`
@@ -471,12 +481,19 @@ func (s *stravaService) GetActivityStreams(accessToken string, activityID int64,
 		return nil, fmt.Errorf("failed to get activity streams: %w", err)
 	}
 
-	var streams StravaStreams
-	if err := json.Unmarshal(body, &streams); err != nil {
-		return nil, fmt.Errorf("failed to parse activity streams: %w", err)
+	// First unmarshal into the raw response format
+	var rawStreams StravaStreamsResponse
+	if err := json.Unmarshal(body, &rawStreams); err != nil {
+		return nil, fmt.Errorf("failed to parse activity streams response: %w", err)
 	}
 
-	return &streams, nil
+	// Convert to our structured format
+	streams, err := parseStreamsResponse(rawStreams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert activity streams: %w", err)
+	}
+
+	return streams, nil
 }
 
 func (s *stravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {
@@ -516,4 +533,121 @@ func (s *stravaService) RefreshToken(refreshToken string) (*TokenResponse, error
 	}
 
 	return &tokenResp, nil
+}
+
+// parseStreamsResponse converts the raw Strava streams response to our structured format
+func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, error) {
+	streams := &StravaStreams{}
+
+	for streamType, streamData := range rawStreams {
+		switch streamType {
+		case "time":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Time = make([]int, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Time[i] = int(val)
+					}
+				}
+			}
+		case "distance":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Distance = make([]float64, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Distance[i] = val
+					}
+				}
+			}
+		case "latlng":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Latlng = make([][]float64, len(data))
+				for i, v := range data {
+					if coords, ok := v.([]interface{}); ok && len(coords) == 2 {
+						streams.Latlng[i] = make([]float64, 2)
+						if lat, ok := coords[0].(float64); ok {
+							streams.Latlng[i][0] = lat
+						}
+						if lng, ok := coords[1].(float64); ok {
+							streams.Latlng[i][1] = lng
+						}
+					}
+				}
+			}
+		case "altitude":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Altitude = make([]float64, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Altitude[i] = val
+					}
+				}
+			}
+		case "velocity_smooth":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.VelocitySmooth = make([]float64, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.VelocitySmooth[i] = val
+					}
+				}
+			}
+		case "heartrate":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Heartrate = make([]int, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Heartrate[i] = int(val)
+					}
+				}
+			}
+		case "cadence":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Cadence = make([]int, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Cadence[i] = int(val)
+					}
+				}
+			}
+		case "watts":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Watts = make([]int, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Watts[i] = int(val)
+					}
+				}
+			}
+		case "temp":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Temp = make([]int, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.Temp[i] = int(val)
+					}
+				}
+			}
+		case "moving":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.Moving = make([]bool, len(data))
+				for i, v := range data {
+					if val, ok := v.(bool); ok {
+						streams.Moving[i] = val
+					}
+				}
+			}
+		case "grade_smooth":
+			if data, ok := streamData.Data.([]interface{}); ok {
+				streams.GradeSmooth = make([]float64, len(data))
+				for i, v := range data {
+					if val, ok := v.(float64); ok {
+						streams.GradeSmooth[i] = val
+					}
+				}
+			}
+		}
+	}
+
+	return streams, nil
 }

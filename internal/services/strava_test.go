@@ -200,13 +200,32 @@ func TestStravaService_GetActivityDetail(t *testing.T) {
 }
 
 func TestStravaService_GetActivityStreams(t *testing.T) {
-	mockStreams := StravaStreams{
-		Time:         []int{0, 10, 20, 30},
-		Distance:     []float64{0.0, 50.0, 100.0, 150.0},
-		Heartrate:    []int{120, 140, 160, 150},
-		Altitude:     []float64{100.0, 105.0, 110.0, 108.0},
-		Watts:        []int{200, 250, 300, 280},
-		Cadence:      []int{80, 85, 90, 88},
+	// Mock the actual Strava API response format with key_by_type=true
+	mockStreamsResponse := StravaStreamsResponse{
+		"time": StravaStreamData{
+			Data:       []interface{}{0.0, 10.0, 20.0, 30.0},
+			SeriesType: "time",
+		},
+		"distance": StravaStreamData{
+			Data:       []interface{}{0.0, 50.0, 100.0, 150.0},
+			SeriesType: "distance",
+		},
+		"heartrate": StravaStreamData{
+			Data:       []interface{}{120.0, 140.0, 160.0, 150.0},
+			SeriesType: "heartrate",
+		},
+		"altitude": StravaStreamData{
+			Data:       []interface{}{100.0, 105.0, 110.0, 108.0},
+			SeriesType: "altitude",
+		},
+		"watts": StravaStreamData{
+			Data:       []interface{}{200.0, 250.0, 300.0, 280.0},
+			SeriesType: "watts",
+		},
+		"cadence": StravaStreamData{
+			Data:       []interface{}{80.0, 85.0, 90.0, 88.0},
+			SeriesType: "cadence",
+		},
 	}
 	
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +239,7 @@ func TestStravaService_GetActivityStreams(t *testing.T) {
 		assert.Equal(t, "true", params.Get("key_by_type"))
 		
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(mockStreams)
+		json.NewEncoder(w).Encode(mockStreamsResponse)
 	}))
 	defer server.Close()
 	
@@ -331,5 +350,46 @@ func TestActivityParams(t *testing.T) {
 		assert.Equal(t, after, *params.After)
 		assert.Equal(t, 2, params.Page)
 		assert.Equal(t, 50, params.PerPage)
+	})
+}
+
+func TestParseStreamsResponse(t *testing.T) {
+	t.Run("parses streams response correctly", func(t *testing.T) {
+		rawStreams := StravaStreamsResponse{
+			"time": StravaStreamData{
+				Data:       []interface{}{0.0, 10.0, 20.0, 30.0},
+				SeriesType: "time",
+			},
+			"altitude": StravaStreamData{
+				Data:       []interface{}{100.0, 105.0, 110.0, 108.0},
+				SeriesType: "altitude",
+			},
+			"heartrate": StravaStreamData{
+				Data:       []interface{}{120.0, 140.0, 160.0, 150.0},
+				SeriesType: "heartrate",
+			},
+			"latlng": StravaStreamData{
+				Data: []interface{}{
+					[]interface{}{37.7749, -122.4194},
+					[]interface{}{37.7750, -122.4195},
+				},
+				SeriesType: "latlng",
+			},
+			"moving": StravaStreamData{
+				Data:       []interface{}{true, true, false, true},
+				SeriesType: "moving",
+			},
+		}
+
+		streams, err := parseStreamsResponse(rawStreams)
+		
+		require.NoError(t, err)
+		assert.Equal(t, []int{0, 10, 20, 30}, streams.Time)
+		assert.Equal(t, []float64{100.0, 105.0, 110.0, 108.0}, streams.Altitude)
+		assert.Equal(t, []int{120, 140, 160, 150}, streams.Heartrate)
+		assert.Equal(t, []bool{true, true, false, true}, streams.Moving)
+		assert.Len(t, streams.Latlng, 2)
+		assert.Equal(t, []float64{37.7749, -122.4194}, streams.Latlng[0])
+		assert.Equal(t, []float64{37.7750, -122.4195}, streams.Latlng[1])
 	})
 }

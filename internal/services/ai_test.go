@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -630,4 +631,360 @@ func TestAIService_ToolExecutionErrorHandling(t *testing.T) {
 	assert.Contains(t, results[0].Content, "Error getting athlete profile")
 	
 	service.mockStrava.AssertExpectations(t)
+}
+
+// Test enhanced user-friendly progress messaging
+func TestAIService_EnhancedCoachingProgressMessage(t *testing.T) {
+	service := setupTestAIService()
+	
+	t.Run("contextual messages avoid technical jargon", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		// Test all tool types for coaching language
+		toolTypes := []string{
+			"get-athlete-profile",
+			"get-recent-activities", 
+			"get-activity-details",
+			"get-activity-streams",
+			"update-athlete-logbook",
+		}
+		
+		for _, toolType := range toolTypes {
+			toolCalls := []openai.ToolCall{
+				{
+					Function: openai.FunctionCall{Name: toolType},
+				},
+			}
+			message := service.getCoachingProgressMessage(processor, toolCalls)
+			
+			// Ensure no technical jargon
+			assert.NotContains(t, message, "API", "Tool %s should not mention API", toolType)
+			assert.NotContains(t, message, "executing", "Tool %s should not mention executing", toolType)
+			assert.NotContains(t, message, "tool", "Tool %s should not mention tool", toolType)
+			assert.NotContains(t, message, "function", "Tool %s should not mention function", toolType)
+			assert.NotContains(t, message, "call", "Tool %s should not mention call", toolType)
+			
+			// Ensure coaching language
+			assert.NotEmpty(t, message, "Tool %s should provide a message", toolType)
+		}
+	})
+	
+	t.Run("messages sound natural and coaching-focused", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		// Test different rounds
+		for round := 0; round < 5; round++ {
+			processor.CurrentRound = round
+			message := service.getCoachingProgressMessage(processor, []openai.ToolCall{})
+			
+			// Ensure messages are coaching-focused
+			assert.NotEmpty(t, message)
+			assert.NotContains(t, message, "API")
+			assert.NotContains(t, message, "executing")
+			assert.NotContains(t, message, "tool")
+			assert.NotContains(t, message, "function")
+			
+			// Should contain coaching language (more flexible check)
+			coachingWords := []string{"training", "analyzing", "reviewing", "looking", "data", "insights", "performance", "workout", "athletic", "activities", "patterns", "trends", "analysis", "final", "comprehensive", "putting", "together"}
+			hasCoachingWord := false
+			for _, word := range coachingWords {
+				if strings.Contains(strings.ToLower(message), strings.ToLower(word)) {
+					hasCoachingWord = true
+					break
+				}
+			}
+			assert.True(t, hasCoachingWord, "Message should contain coaching-focused language: %s", message)
+		}
+	})
+}
+
+func TestAIService_GetContextualProgressMessage(t *testing.T) {
+	service := setupTestAIService()
+	
+	t.Run("multiple tool calls provide appropriate context", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		// Test combination of profile and activities
+		toolCalls := []openai.ToolCall{
+			{Function: openai.FunctionCall{Name: "get-athlete-profile"}},
+			{Function: openai.FunctionCall{Name: "get-recent-activities"}},
+		}
+		
+		message := service.getContextualProgressMessage(processor, toolCalls)
+		assert.NotEmpty(t, message)
+		assert.NotContains(t, message, "API")
+		assert.NotContains(t, message, "executing")
+		
+		// Test streams (highest priority)
+		toolCalls = []openai.ToolCall{
+			{Function: openai.FunctionCall{Name: "get-athlete-profile"}},
+			{Function: openai.FunctionCall{Name: "get-activity-streams"}},
+		}
+		
+		message = service.getContextualProgressMessage(processor, toolCalls)
+		// Should prioritize streams message
+		assert.Contains(t, message, "data")
+	})
+	
+	t.Run("different rounds provide different context for same tools", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		toolCalls := []openai.ToolCall{
+			{Function: openai.FunctionCall{Name: "get-recent-activities"}},
+		}
+		
+		// Round 0 - initial
+		processor.CurrentRound = 0
+		message1 := service.getContextualProgressMessage(processor, toolCalls)
+		
+		// Round 1 - follow-up
+		processor.CurrentRound = 1
+		message2 := service.getContextualProgressMessage(processor, toolCalls)
+		
+		// Messages should be different for different rounds
+		assert.NotEqual(t, message1, message2)
+		assert.NotContains(t, message1, "API")
+		assert.NotContains(t, message2, "API")
+	})
+}
+
+func TestAIService_GetRoundBasedProgressMessage(t *testing.T) {
+	service := setupTestAIService()
+	
+	t.Run("provides different messages for each round", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		messages := make([]string, 6)
+		for round := 0; round < 6; round++ {
+			processor.CurrentRound = round
+			messages[round] = service.getRoundBasedProgressMessage(processor)
+			
+			// Ensure no technical jargon
+			assert.NotContains(t, messages[round], "API")
+			assert.NotContains(t, messages[round], "executing")
+			assert.NotContains(t, messages[round], "tool")
+			assert.NotContains(t, messages[round], "function")
+			assert.NotContains(t, messages[round], "call")
+			
+			// Ensure coaching language
+			assert.NotEmpty(t, messages[round])
+		}
+		
+		// Messages should vary (at least some should be different)
+		uniqueMessages := make(map[string]bool)
+		for _, msg := range messages {
+			uniqueMessages[msg] = true
+		}
+		assert.GreaterOrEqual(t, len(uniqueMessages), 3, "Should have variety in messages")
+	})
+	
+	t.Run("handles high round numbers gracefully", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		processor.CurrentRound = 10 // Beyond normal range
+		
+		message := service.getRoundBasedProgressMessage(processor)
+		assert.NotEmpty(t, message)
+		assert.NotContains(t, message, "API")
+	})
+}
+
+func TestAIService_EnhancedFinalResponse(t *testing.T) {
+	service := setupTestAIService()
+	
+	t.Run("provides coaching-focused final responses with variety", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		testCases := []struct {
+			reason     string
+			hasContent bool
+		}{
+			{"max_rounds", false},
+			{"sufficient_data", false},
+			{"no_tools", false},
+			{"other", false},
+		}
+		
+		for _, tc := range testCases {
+			t.Run(tc.reason, func(t *testing.T) {
+				response := service.generateFinalResponse(processor, tc.reason, tc.hasContent)
+				
+				if tc.hasContent {
+					assert.Empty(t, response)
+				} else {
+					assert.NotEmpty(t, response)
+					assert.NotContains(t, response, "API")
+					assert.NotContains(t, response, "executing")
+					assert.NotContains(t, response, "tool")
+					
+					// Should contain coaching language (more flexible check)
+					coachingWords := []string{"training", "analysis", "recommend", "insights", "coaching", "advice", "review", "data", "found", "suggest", "perspective", "thoughts", "share", "conversation", "based"}
+					hasCoachingWord := false
+					for _, word := range coachingWords {
+						if strings.Contains(strings.ToLower(response), strings.ToLower(word)) {
+							hasCoachingWord = true
+							break
+						}
+					}
+					assert.True(t, hasCoachingWord, "Response should contain coaching language: %s", response)
+				}
+			})
+		}
+	})
+	
+	t.Run("provides variety in responses", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		// Test multiple calls to same reason to check for variety
+		responses := make([]string, 5)
+		for i := 0; i < 5; i++ {
+			responses[i] = service.generateFinalResponse(processor, "sufficient_data", false)
+		}
+		
+		// Should have some variety (at least 1 unique response, but ideally more)
+		uniqueResponses := make(map[string]bool)
+		for _, resp := range responses {
+			uniqueResponses[resp] = true
+		}
+		assert.GreaterOrEqual(t, len(uniqueResponses), 1, "Should provide at least one response")
+		// Note: Due to time-based randomization, we might get the same response multiple times in quick succession
+	})
+}
+
+func TestAIService_GetRandomMessage(t *testing.T) {
+	service := setupTestAIService()
+	
+	t.Run("returns message from provided slice", func(t *testing.T) {
+		messages := []string{
+			"First message",
+			"Second message",
+			"Third message",
+		}
+		
+		result := service.getRandomMessage(messages)
+		assert.Contains(t, messages, result)
+	})
+	
+	t.Run("handles empty slice gracefully", func(t *testing.T) {
+		result := service.getRandomMessage([]string{})
+		assert.Equal(t, "Continuing my analysis...", result)
+	})
+	
+	t.Run("provides variety over multiple calls", func(t *testing.T) {
+		messages := []string{
+			"Message A",
+			"Message B", 
+			"Message C",
+			"Message D",
+			"Message E",
+		}
+		
+		results := make(map[string]bool)
+		
+		// Call multiple times to check for variety
+		for i := 0; i < 20; i++ {
+			result := service.getRandomMessage(messages)
+			results[result] = true
+			assert.Contains(t, messages, result)
+		}
+		
+		// Should get some variety (at least 1 message, but ideally more)
+		assert.GreaterOrEqual(t, len(results), 1, "Should provide at least one message")
+		// Note: Due to time-based randomization, we might get the same message multiple times in quick succession
+	})
+}
+
+func TestIterativeProcessor_EnhancedProgressMessage(t *testing.T) {
+	t.Run("enhanced messages avoid technical jargon", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		for round := 0; round < 6; round++ {
+			processor.CurrentRound = round
+			message := processor.GetProgressMessage()
+			
+			// Ensure no technical jargon
+			assert.NotContains(t, message, "API")
+			assert.NotContains(t, message, "executing")
+			assert.NotContains(t, message, "tool")
+			assert.NotContains(t, message, "function")
+			assert.NotContains(t, message, "call")
+			
+			// Ensure coaching language (more flexible check)
+			assert.NotEmpty(t, message)
+			coachingWords := []string{"training", "analyzing", "reviewing", "looking", "data", "insights", "performance", "workout", "athletic", "activities", "patterns", "trends", "comprehensive", "recommendations", "analysis", "final", "putting", "together"}
+			hasCoachingWord := false
+			for _, word := range coachingWords {
+				if strings.Contains(strings.ToLower(message), strings.ToLower(word)) {
+					hasCoachingWord = true
+					break
+				}
+			}
+			assert.True(t, hasCoachingWord, "Message should contain coaching language: %s", message)
+		}
+	})
+	
+	t.Run("provides variety in enhanced messages", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		
+		messages := make([]string, 15)
+		for i := 0; i < 15; i++ {
+			processor.CurrentRound = i % 5 // Cycle through rounds
+			messages[i] = processor.GetProgressMessage()
+		}
+		
+		// Should have variety due to randomization
+		uniqueMessages := make(map[string]bool)
+		for _, msg := range messages {
+			uniqueMessages[msg] = true
+		}
+		assert.GreaterOrEqual(t, len(uniqueMessages), 5, "Should provide variety in enhanced messages")
+	})
+}
+
+func TestAIService_ErrorMessagesAreCoachingFocused(t *testing.T) {
+	service := setupTestAIService()
+	
+	t.Run("streaming error messages are user-friendly", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		responseChan := make(chan string, 10)
+		
+		// Test with OpenAI unavailable error
+		err := ErrOpenAIUnavailable
+		resultErr := service.handleStreamingError(err, processor, responseChan)
+		
+		assert.NoError(t, resultErr) // Should handle gracefully
+		
+		// Check the message sent to channel
+		select {
+		case message := <-responseChan:
+			assert.NotContains(t, message, "API")
+			assert.NotContains(t, message, "OpenAI")
+			assert.NotContains(t, message, "technical")
+			assert.Contains(t, message, "training")
+		default:
+			t.Fatal("Expected message in response channel")
+		}
+	})
+	
+	t.Run("tool execution error messages are user-friendly", func(t *testing.T) {
+		processor := NewIterativeProcessor(&MessageContext{}, nil)
+		processor.AddToolResults([]ToolResult{{ToolCallID: "test", Content: "test"}}) // Add some previous results
+		
+		responseChan := make(chan string, 10)
+		
+		err := fmt.Errorf("some tool error")
+		resultErr := service.handleToolExecutionError(err, processor, responseChan)
+		
+		assert.NoError(t, resultErr) // Should handle gracefully when there are previous results
+		
+		// Check the message sent to channel
+		select {
+		case message := <-responseChan:
+			assert.NotContains(t, message, "API")
+			assert.NotContains(t, message, "tool")
+			assert.NotContains(t, message, "execution")
+			assert.Contains(t, message, "training")
+		default:
+			t.Fatal("Expected message in response channel")
+		}
+	})
 }

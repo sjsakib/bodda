@@ -137,7 +137,7 @@ type StravaService interface {
 ```go
 type AIService interface {
     // Core AI interaction - processes user messages and streams responses
-    // Handles all tool calling internally
+    // Handles all tool calling internally including multi-turn iterations
     ProcessMessage(context *MessageContext) (chan string, error)
 }
 
@@ -152,6 +152,7 @@ type MessageContext struct {
 // Internal tool execution methods (not exposed in interface):
 // - executeStravaTools(userID string, toolCalls []ToolCall) ([]ToolResult, error)
 // - executeLogbookTool(userID string, toolCall ToolCall) (*ToolResult, error)
+// - processIterativeToolCalls(context *MessageContext, messages []Message) (chan string, error)
 ```
 
 #### 5. Logbook Service
@@ -285,6 +286,13 @@ CREATE TABLE athlete_logbooks (
 #### Logbook Management Tool
 - `update-athlete-logbook` - Update or create the athlete logbook with free-form string content structured by the LLM
 
+#### Multi-Turn Tool Execution
+The AI service supports iterative tool calling where each round of tool results can inform the next set of tool calls. This enables sophisticated analysis workflows such as:
+
+1. **Progressive Data Gathering:** Get athlete profile → Get recent activities → Get detailed streams for specific workouts
+2. **Contextual Analysis:** Analyze recent performance → Get historical data for comparison → Update logbook with insights
+3. **Adaptive Coaching:** Assess current fitness → Get relevant training data → Provide personalized recommendations
+
 #### Tool Implementation Details
 ```go
 type StravaTools struct {
@@ -297,7 +305,85 @@ type StravaTools struct {
 type LogbookTool struct {
     UpdateAthleteLogbook func(content string) error
 }
+
+type IterativeProcessor struct {
+    MaxRounds        int                    // Maximum tool call rounds (default: 5)
+    ProgressCallback func(string)          // Stream progress updates
+    ToolResults      [][]ToolResult        // Results from each round
+    Context          *MessageContext       // Persistent context
+}
+
+// IterativeProcessor Workflow:
+// 1. Initial AI response may contain tool calls
+// 2. Execute all tool calls in parallel for round 1
+// 3. Add tool results to conversation context
+// 4. Send updated context back to AI for analysis
+// 5. AI can either:
+//    - Generate more tool calls (start next round)
+//    - Provide final response to user
+// 6. Repeat until AI provides final response or max rounds reached
+// 7. Stream progress updates at each step ("Analyzing activities...", "Getting detailed data...")
+
+// Example Multi-Turn Flow:
+// Round 1: AI calls get-athlete-profile, get-recent-activities
+// → Results show user is a runner with recent tempo runs
+// Round 2: AI calls get-activity-details for specific tempo runs
+// → Results show heart rate zones and pacing data
+// Round 3: AI calls get-activity-streams for detailed analysis
+// → Results show power/pace correlation
+// Round 4: AI calls update-athlete-logbook with insights
+// → Final response with comprehensive coaching advice
 ```
+
+## Multi-Turn Tool Calling Architecture
+
+### Iterative Processing Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant AI as AI Service
+    participant Tools as Tool Executor
+    participant Strava as Strava API
+    participant DB as Database
+
+    User->>AI: Send message
+    AI->>AI: Generate initial response with tool calls
+    
+    loop Iterative Tool Calls (max 5 rounds)
+        AI->>Tools: Execute tool calls
+        Tools->>Strava: Fetch data (if needed)
+        Tools->>DB: Update logbook (if needed)
+        Tools-->>AI: Return tool results
+        AI->>AI: Process results & determine next actions
+        
+        alt More tool calls needed
+            AI->>AI: Generate additional tool calls
+        else Analysis complete
+            AI->>User: Stream final response
+        end
+    end
+```
+
+### Implementation Strategy
+
+**Iterative Context Management:**
+- Maintain conversation state across tool call rounds
+- Accumulate tool results for comprehensive analysis
+- Track tool call depth to prevent infinite loops
+- Stream progress updates during long analysis chains
+
+**Tool Call Orchestration:**
+- Maximum 5 rounds of tool calls per user message
+- Each round can contain multiple parallel tool calls
+- Results from previous rounds inform subsequent tool selection
+- Graceful degradation when tool calls fail mid-iteration
+
+**Progress Streaming:**
+- Stream intermediate updates like "Analyzing your recent activities..."
+- Provide context about what data is being gathered
+- Show progress through complex analysis workflows
+- Maintain user engagement during longer processing times
 
 ## Error Handling
 
@@ -306,6 +392,7 @@ type LogbookTool struct {
 - Authentication failures with redirect to login
 - Streaming connection errors with reconnection
 - User-friendly error messages for all failure scenarios
+- Progress indication during multi-turn tool processing
 
 ### Backend Error Handling
 - Structured error responses with consistent format
@@ -313,6 +400,8 @@ type LogbookTool struct {
 - OpenAI API failures with fallback responses
 - Database connection and query error handling
 - Graceful degradation when external services are unavailable
+- Tool call iteration limits and timeout handling
+- Partial result handling when some tool calls fail
 
 ### Error Response Format
 ```go
