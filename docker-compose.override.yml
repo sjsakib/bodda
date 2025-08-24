@@ -1,0 +1,39 @@
+# Docker Compose override for development
+# This file is automatically loaded by docker-compose and overrides settings in docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: bodda_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./scripts/seed-dev-data.sql:/docker-entrypoint-initdb.d/02-seed-dev-data.sql
+
+  backend:
+    build:
+      target: development
+    environment:
+      - LOG_LEVEL=debug
+      - ENABLE_PROFILING=true
+      - ENABLE_METRICS=true
+    volumes:
+      - .:/app
+      - /app/tmp
+      - /app/bin
+    stdin_open: true
+    tty: true
+
+  frontend:
+    build:
+      target: development
+    environment:
+      - VITE_API_URL=http://localhost:8080
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    stdin_open: true
+    tty: true

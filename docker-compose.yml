@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bodda}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bodda-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      target: ${BUILD_TARGET:-development}
+    ports:
+      - '${BACKEND_PORT:-8080}:8080'
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-bodda}?sslmode=disable
+      - PORT=8080
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - JWT_SECRET=${JWT_SECRET}
+      - STRAVA_CLIENT_ID=${STRAVA_CLIENT_ID}
+      - STRAVA_CLIENT_SECRET=${STRAVA_CLIENT_SECRET}
+      - STRAVA_REDIRECT_URL=${STRAVA_REDIRECT_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/bin
+    working_dir: /app
+    networks:
+      - bodda-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    ports:
+      - '${FRONTEND_PORT:-5173}:5173'
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8080}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/dist
+    working_dir: /app
+    networks:
+      - bodda-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  bodda-network:
+    driver: bridge
