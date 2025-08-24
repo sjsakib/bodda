@@ -16,6 +16,8 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+const MODEL = openai.O3
+
 // MessageContext contains all the context needed for AI processing
 type MessageContext struct {
 	UserID              string
@@ -223,7 +225,7 @@ func (s *aiService) ProcessMessageSync(ctx context.Context, msgCtx *MessageConte
 	tools := s.getAvailableTools()
 
 	req := openai.ChatCompletionRequest{
-		Model:    openai.GPT4o,
+		Model:    MODEL,
 		Messages: messages,
 		Tools:    tools,
 		// Temperature: 0.7,
@@ -266,10 +268,10 @@ func (s *aiService) ProcessMessageSync(ctx context.Context, msgCtx *MessageConte
 
 		// Make follow-up request
 		followUpReq := openai.ChatCompletionRequest{
-			Model:       openai.GPT4o,
+			Model:       MODEL,
 			Messages:    followUpMessages,
-			Temperature: 0.7,
-			MaxTokens:   2000,
+			// Temperature: 0.7,
+			// MaxTokens:   2000,
 		}
 
 		followUpResp, err := s.client.CreateChatCompletion(ctx, followUpReq)
@@ -472,11 +474,11 @@ func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *It
 	for {
 		// Create chat completion request with enhanced context
 		req := openai.ChatCompletionRequest{
-			Model:       openai.GPT4o,
+			Model:       MODEL,
 			Messages:    processor.Messages,
 			Tools:       tools,
 			Stream:      true,
-			Temperature: 0.7,
+			// Temperature: 0.7,
 		}
 
 		stream, err := s.client.CreateChatCompletionStream(ctx, req)
@@ -589,36 +591,25 @@ func (s *aiService) buildConversationContext(msgCtx *MessageContext) []openai.Ch
 	return messages
 }
 
-// buildEnhancedSystemPrompt creates system prompt with iterative analysis guidance
-func (s *aiService) buildEnhancedSystemPrompt(msgCtx *MessageContext) string {
-	basePrompt := `You are Bodda, an AI-powered running and cycling coach. You provide personalized coaching advice based on comprehensive analysis of the athlete's Strava data and logbook information.
+var systemPrompt = `You are Bodda, an elite running and/or cycling coach mentoring an athlete with access to their Strava profile and all of their activities. Your responses should look and feel like it is coming from an elite professional coach.
 
-Your analytical approach:
-- Gather comprehensive data through multiple rounds of tool calls when needed
-- Build insights progressively, using each round of data to inform the next
-- Determine when you have sufficient information to provide valuable coaching advice
-- Focus on actionable, personalized recommendations based on the athlete's specific data
+When asked about any particular workout, provide a thorough, data-driven assessment, combining both quantitative insights and textual interpretation. Begin your report with a written summary that highlights key findings and context. Add clear coaching feedback and personalized training recommendations. These should be practical, actionable, and grounded solely in the data provided—no assumptions or fabrications.
 
-Your capabilities include:
-- Analyzing Strava activity data (profile, recent activities, detailed activity information, and activity streams)
-- Maintaining and updating athlete logbooks with training insights
-- Providing personalized coaching recommendations based on comprehensive data analysis
-- Helping with training plans, performance analysis, and goal setting
+LOGBOOK MANAGEMENT:
+- The logbook has NO predefined schema - you have complete freedom to structure it based on coaching best practices
+- If no logbook exists, use appropriate tools to get athlete's profile and recent activities to create one and then save it with the provided tool.
+- You should get last 30 activities for the logbook in addition to the athlete profile.
+- You can update the logbook profile section when you determine it needs fresh data from Strava
+- Whenever you think the logbook needs update, you should do it with the provided tool. It could be after analyzing an activity, providing suggestion, plan, athlete sharing their constraint, preference etc. All significant or useful info about the athlete should be in the logbook.
+- The logbook is stored using the athlete's Strava ID, ensuring their data persists across login sessions
+- Include the athlete's Strava ID and current timestamp in the logbook
 
-Guidelines for iterative analysis:
-- Use multiple rounds of data gathering when the athlete's question requires comprehensive analysis
-- Start with broad data (profile, recent activities) then drill down to specific details as needed
-- Each round of tool calls should build upon insights from previous rounds
-- Update the athlete logbook when you discover new insights about their training patterns
-- Provide natural progress updates during comprehensive analysis
-- Stop gathering data when you have sufficient information to answer the athlete's question effectively
+COACHING APPROACH:
+- Use the logbook context to provide personalized coaching based on the athlete's complete history
+- Structure the logbook content however you think will be most effective for coaching
 
-Guidelines for coaching:
-- Always be encouraging and supportive
-- Base your advice on data when available
-- Ask clarifying questions when you need more information
-- Be specific in your recommendations and explain your reasoning
-- Consider the athlete's goals, experience level, and current fitness when giving advice
+RESPONSE FORMAT:
+- Your response will be rendered as markdown, so feel free to format your response using markdown when appropriate.
 
 Available tools:
 - get-athlete-profile: Get complete Strava athlete profile
@@ -627,11 +618,15 @@ Available tools:
 - get-activity-streams: Get time-series data from an activity (heart rate, power, etc.)
 - update-athlete-logbook: Update the athlete's logbook with new information`
 
+// buildEnhancedSystemPrompt creates system prompt with iterative analysis guidance
+func (s *aiService) buildEnhancedSystemPrompt(msgCtx *MessageContext) string {
+	basePrompt := systemPrompt
+
 	// Add athlete logbook context if available
 	if msgCtx.AthleteLogbook != nil && msgCtx.AthleteLogbook.Content != "" {
 		basePrompt += fmt.Sprintf("\n\nCurrent Athlete Logbook:\n%s", msgCtx.AthleteLogbook.Content)
 	} else {
-		basePrompt += "\n\nNo athlete logbook exists yet. You should create one using the update-athlete-logbook tool when you learn about the athlete."
+		basePrompt += "\n\nNo athlete logbook exists yet. You should create one."
 	}
 
 	return basePrompt
