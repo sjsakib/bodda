@@ -5,7 +5,7 @@ import { Message, Session } from '../services/api';
 import SessionSidebar from './SessionSidebar';
 import { ErrorDisplay, LoadingSpinner } from './ErrorBoundary';
 import { MessageErrorHandler } from './ApiErrorHandler';
-import ReactMarkdown from 'react-markdown';
+import { SafeMarkdownRenderer } from './MarkdownRenderer';
 
 export default function ChatInterface() {
   const params = useParams<{ sessionId: string }>();
@@ -365,18 +365,19 @@ export default function ChatInterface() {
                 }`}
               >
                 <div
-                  className={`max-w-3xl rounded-lg px-4 py-3 ${
+                  className={`max-w-full sm:max-w-2xl lg:max-w-3xl rounded-lg px-3 sm:px-4 py-2 sm:py-3 ${
                     message.role === 'user'
                       ? 'bg-blue-600 text-white'
                       : 'bg-white border border-gray-200'
                   }`}
                 >
                   {message.role === 'assistant' ? (
-                    <div className='prose prose-sm max-w-none'>
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
-                    </div>
+                    <SafeMarkdownRenderer 
+                      content={message.content}
+                      className="max-w-none"
+                    />
                   ) : (
-                    <div className='whitespace-pre-wrap'>{message.content}</div>
+                    <div className='whitespace-pre-wrap text-sm sm:text-base'>{message.content}</div>
                   )}
                   <div
                     className={`text-xs mt-2 ${
