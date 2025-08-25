@@ -181,6 +181,7 @@
   - _Requirements: 9.4_
 
 - [ ] 19. Create comprehensive tests for multi-turn analysis workflows
+
   - Write integration tests for complete multi-round analysis scenarios
   - Test maximum iteration limits and infinite loop prevention
   - Create test cases for partial data failures during analysis rounds
@@ -188,3 +189,23 @@
   - Add performance tests for iterative analysis overhead
   - Create end-to-end tests with realistic coaching analysis workflows
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
+
+- [x] 20. Implement automatic Strava token refresh mechanism
+
+  - Modify StravaService methods to accept User objects instead of raw tokens
+  - Create executeWithTokenRefresh wrapper method for handling 401 errors automatically
+  - Implement token refresh logic that updates database and retries original request
+  - Add error handling for failed token refresh (invalid refresh token)
+  - Update all Strava API calls to use the new token refresh wrapper
+  - Write unit tests for token refresh scenarios and error handling
+  - _Requirements: 10.1, 10.2, 10.3, 10.5, 10.6_
+
+- [x] 21. Add logout functionality to chat interface
+  - Add logout button to chat i nterface header with appropriate styling
+  - Implement logout API endpoint that clears JWT tokens but preserves user data
+  - Create frontend logout handler that clears browser tokens and redirects to landing page
+  - Update authentication middleware to handle logout requests properly
+  - Ensure logout button is positioned prominently but doesn't interfere with chat functionality
+  - Verify that re-login via Strava OAuth reconnects to existing user account and data
+  - Write tests for logout flow, token cleanup, and re-login data continuity
+  - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6_

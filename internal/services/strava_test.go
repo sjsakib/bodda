@@ -1,16 +1,43 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"bodda/internal/config"
+	"bodda/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+// MockUserRepository for testing
+type MockStravaUserRepository struct {
+	mock.Mock
+}
+
+func (m *MockStravaUserRepository) Update(ctx context.Context, user *models.User) error {
+	args := m.Called(ctx, user)
+	return args.Error(0)
+}
+
+// testStravaServiceWithMockRefresh wraps stravaService to allow mocking RefreshToken
+type testStravaServiceWithMockRefresh struct {
+	*stravaService
+	mockRefreshFunc func(string) (*TokenResponse, error)
+}
+
+func (t *testStravaServiceWithMockRefresh) RefreshToken(refreshToken string) (*TokenResponse, error) {
+	if t.mockRefreshFunc != nil {
+		return t.mockRefreshFunc(refreshToken)
+	}
+	return t.stravaService.RefreshToken(refreshToken)
+}
 
 func TestNewStravaService(t *testing.T) {
 	cfg := &config.Config{
@@ -18,7 +45,8 @@ func TestNewStravaService(t *testing.T) {
 		StravaClientSecret: "test_client_secret",
 	}
 	
-	service := NewStravaService(cfg)
+	mockUserRepo := &MockStravaUserRepository{}
+	service := NewStravaService(cfg, mockUserRepo)
 	assert.NotNil(t, service)
 }
 
@@ -67,9 +95,17 @@ func TestStravaService_GetAthleteProfile(t *testing.T) {
 	defer server.Close()
 	
 	cfg := &config.Config{}
-	service := NewTestStravaService(cfg, server.URL)
+	mockUserRepo := &MockStravaUserRepository{}
+	service := NewTestStravaService(cfg, server.URL, mockUserRepo)
 	
-	athlete, err := service.GetAthleteProfile("test_token")
+	testUser := &models.User{
+		ID:           "test-user-id",
+		AccessToken:  "test_token",
+		RefreshToken: "test_refresh_token",
+		TokenExpiry:  time.Now().Add(time.Hour),
+	}
+	
+	athlete, err := service.GetAthleteProfile(testUser)
 	
 	require.NoError(t, err)
 	assert.Equal(t, mockAthlete.ID, athlete.ID)
@@ -129,9 +165,17 @@ func TestStravaService_GetActivities(t *testing.T) {
 	defer server.Close()
 	
 	cfg := &config.Config{}
-	service := NewTestStravaService(cfg, server.URL)
+	mockUserRepo := &MockStravaUserRepository{}
+	service := NewTestStravaService(cfg, server.URL, mockUserRepo)
 	
-	activities, err := service.GetActivities("test_token", ActivityParams{
+	testUser := &models.User{
+		ID:           "test-user-id",
+		AccessToken:  "test_token",
+		RefreshToken: "test_refresh_token",
+		TokenExpiry:  time.Now().Add(time.Hour),
+	}
+	
+	activities, err := service.GetActivities(testUser, ActivityParams{
 		PerPage: 10,
 	})
 	
@@ -185,9 +229,17 @@ func TestStravaService_GetActivityDetail(t *testing.T) {
 	defer server.Close()
 	
 	cfg := &config.Config{}
-	service := NewTestStravaService(cfg, server.URL)
+	mockUserRepo := &MockStravaUserRepository{}
+	service := NewTestStravaService(cfg, server.URL, mockUserRepo)
 	
-	activity, err := service.GetActivityDetail("test_token", 123456)
+	testUser := &models.User{
+		ID:           "test-user-id",
+		AccessToken:  "test_token",
+		RefreshToken: "test_refresh_token",
+		TokenExpiry:  time.Now().Add(time.Hour),
+	}
+	
+	activity, err := service.GetActivityDetail(testUser, 123456)
 	
 	require.NoError(t, err)
 	assert.Equal(t, mockActivity.ID, activity.ID)
@@ -244,9 +296,17 @@ func TestStravaService_GetActivityStreams(t *testing.T) {
 	defer server.Close()
 	
 	cfg := &config.Config{}
-	service := NewTestStravaService(cfg, server.URL)
+	mockUserRepo := &MockStravaUserRepository{}
+	service := NewTestStravaService(cfg, server.URL, mockUserRepo)
 	
-	streams, err := service.GetActivityStreams("test_token", 123456, []string{"time", "heartrate", "watts"}, "high")
+	testUser := &models.User{
+		ID:           "test-user-id",
+		AccessToken:  "test_token",
+		RefreshToken: "test_refresh_token",
+		TokenExpiry:  time.Now().Add(time.Hour),
+	}
+	
+	streams, err := service.GetActivityStreams(testUser, 123456, []string{"time", "heartrate", "watts"}, "high")
 	
 	require.NoError(t, err)
 	assert.Len(t, streams.Time, 4)
@@ -257,50 +317,7 @@ func TestStravaService_GetActivityStreams(t *testing.T) {
 	assert.Equal(t, []int{200, 250, 300, 280}, streams.Watts)
 }
 
-func TestStravaService_RefreshToken(t *testing.T) {
-	mockTokenResponse := TokenResponse{
-		AccessToken:  "new_access_token",
-		RefreshToken: "new_refresh_token",
-		ExpiresAt:    time.Now().Add(6 * time.Hour).Unix(),
-		ExpiresIn:    21600,
-		TokenType:    "Bearer",
-	}
-	
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// For token refresh, we expect a different endpoint
-		if r.URL.Path == "/oauth/token" {
-			assert.Equal(t, "POST", r.Method)
-			assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-			
-			err := r.ParseForm()
-			require.NoError(t, err)
-			
-			assert.Equal(t, "test_client_id", r.FormValue("client_id"))
-			assert.Equal(t, "test_client_secret", r.FormValue("client_secret"))
-			assert.Equal(t, "old_refresh_token", r.FormValue("refresh_token"))
-			assert.Equal(t, "refresh_token", r.FormValue("grant_type"))
-			
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(mockTokenResponse)
-		}
-	}))
-	defer server.Close()
-	
-	// For this test, we'll create a simple mock
-	tokenResp := &TokenResponse{
-		AccessToken:  "new_access_token",
-		RefreshToken: "new_refresh_token",
-		ExpiresAt:    time.Now().Add(6 * time.Hour).Unix(),
-		ExpiresIn:    21600,
-		TokenType:    "Bearer",
-	}
-	
-	// Test the token response structure
-	assert.Equal(t, "new_access_token", tokenResp.AccessToken)
-	assert.Equal(t, "new_refresh_token", tokenResp.RefreshToken)
-	assert.Equal(t, "Bearer", tokenResp.TokenType)
-	assert.Greater(t, tokenResp.ExpiresAt, time.Now().Unix())
-}
+
 
 func TestStravaService_ErrorHandling(t *testing.T) {
 	t.Run("handles API errors", func(t *testing.T) {
@@ -311,24 +328,41 @@ func TestStravaService_ErrorHandling(t *testing.T) {
 		defer server.Close()
 		
 		cfg := &config.Config{}
-		service := NewTestStravaService(cfg, server.URL)
+		mockUserRepo := &MockStravaUserRepository{}
+		service := NewTestStravaService(cfg, server.URL, mockUserRepo)
 		
-		_, err := service.GetAthleteProfile("invalid_token")
+		testUser := &models.User{
+			ID:           "test-user-id",
+			AccessToken:  "invalid_token",
+			RefreshToken: "test_refresh_token",
+			TokenExpiry:  time.Now().Add(time.Hour),
+		}
+		
+		_, err := service.GetAthleteProfile(testUser)
 		assert.Error(t, err)
 	})
 	
 	t.Run("handles rate limiting", func(t *testing.T) {
 		cfg := &config.Config{}
+		mockUserRepo := &MockStravaUserRepository{}
 		service := &stravaService{
 			config:      cfg,
 			httpClient:  &http.Client{},
 			rateLimiter: NewRateLimiter(0, time.Minute), // No requests allowed
+			userRepo:    mockUserRepo,
 		}
 		
 		// Set the makeRequest function to the default implementation
 		service.makeRequest = service.defaultMakeRequest
 		
-		_, err := service.GetAthleteProfile("test_token")
+		testUser := &models.User{
+			ID:           "test-user-id",
+			AccessToken:  "test_token",
+			RefreshToken: "test_refresh_token",
+			TokenExpiry:  time.Now().Add(time.Hour),
+		}
+		
+		_, err := service.GetAthleteProfile(testUser)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "rate limit exceeded")
 	})
@@ -391,5 +425,93 @@ func TestParseStreamsResponse(t *testing.T) {
 		assert.Len(t, streams.Latlng, 2)
 		assert.Equal(t, []float64{37.7749, -122.4194}, streams.Latlng[0])
 		assert.Equal(t, []float64{37.7750, -122.4195}, streams.Latlng[1])
+	})
+}
+
+// Test automatic token refresh functionality
+func TestStravaService_ExecuteWithTokenRefresh(t *testing.T) {
+	t.Run("successfully executes API call without token refresh when token is valid", func(t *testing.T) {
+		cfg := &config.Config{}
+		mockUserRepo := &MockStravaUserRepository{}
+		
+		service := &stravaService{
+			config:      cfg,
+			httpClient:  &http.Client{Timeout: 30 * time.Second},
+			rateLimiter: NewRateLimiter(100, 15*time.Minute),
+			userRepo:    mockUserRepo,
+		}
+		
+		testUser := &models.User{
+			ID:           "test-user-id",
+			AccessToken:  "valid_token",
+			RefreshToken: "refresh_token",
+			TokenExpiry:  time.Now().Add(time.Hour),
+		}
+		
+		// Mock API call that succeeds on first try
+		apiCall := func(accessToken string) (interface{}, error) {
+			assert.Equal(t, "valid_token", accessToken)
+			return "success", nil
+		}
+		
+		result, err := service.executeWithTokenRefresh(testUser, apiCall)
+		
+		require.NoError(t, err)
+		assert.Equal(t, "success", result)
+		
+		// User tokens should remain unchanged
+		assert.Equal(t, "valid_token", testUser.AccessToken)
+		assert.Equal(t, "refresh_token", testUser.RefreshToken)
+	})
+	
+	t.Run("handles non-token-related API errors without attempting refresh", func(t *testing.T) {
+		cfg := &config.Config{}
+		mockUserRepo := &MockStravaUserRepository{}
+		
+		service := &stravaService{
+			config:      cfg,
+			httpClient:  &http.Client{Timeout: 30 * time.Second},
+			rateLimiter: NewRateLimiter(100, 15*time.Minute),
+			userRepo:    mockUserRepo,
+		}
+		
+		testUser := &models.User{
+			ID:           "test-user-id",
+			AccessToken:  "valid_token",
+			RefreshToken: "refresh_token",
+			TokenExpiry:  time.Now().Add(time.Hour),
+		}
+		
+		// Mock API call that fails with non-token error
+		apiCall := func(accessToken string) (interface{}, error) {
+			return nil, errors.New("rate limit exceeded")
+		}
+		
+		_, err := service.executeWithTokenRefresh(testUser, apiCall)
+		
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "rate limit exceeded")
+		
+		// User tokens should remain unchanged
+		assert.Equal(t, "valid_token", testUser.AccessToken)
+		assert.Equal(t, "refresh_token", testUser.RefreshToken)
+	})
+}
+
+func TestStravaService_RefreshToken(t *testing.T) {
+	t.Run("validates token response structure", func(t *testing.T) {
+		// Test the token response structure
+		tokenResp := &TokenResponse{
+			AccessToken:  "new_access_token",
+			RefreshToken: "new_refresh_token",
+			ExpiresAt:    time.Now().Add(6 * time.Hour).Unix(),
+			ExpiresIn:    21600,
+			TokenType:    "Bearer",
+		}
+		
+		assert.Equal(t, "new_access_token", tokenResp.AccessToken)
+		assert.Equal(t, "new_refresh_token", tokenResp.RefreshToken)
+		assert.Equal(t, "Bearer", tokenResp.TokenType)
+		assert.Greater(t, tokenResp.ExpiresAt, time.Now().Unix())
 	})
 }

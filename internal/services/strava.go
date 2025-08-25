@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"bodda/internal/config"
+	"bodda/internal/models"
 )
 
 // Strava API data models
@@ -222,17 +224,23 @@ type ActivityParams struct {
 
 // StravaService handles all Strava API interactions
 type StravaService interface {
-	GetAthleteProfile(accessToken string) (*StravaAthlete, error)
-	GetActivities(accessToken string, params ActivityParams) ([]*StravaActivity, error)
-	GetActivityDetail(accessToken string, activityID int64) (*StravaActivityDetail, error)
-	GetActivityStreams(accessToken string, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error)
+	GetAthleteProfile(user *models.User) (*StravaAthlete, error)
+	GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error)
+	GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error)
+	GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error)
 	RefreshToken(refreshToken string) (*TokenResponse, error)
+}
+
+// UserRepositoryInterface defines the interface for user repository operations needed by StravaService
+type UserRepositoryInterface interface {
+	Update(ctx context.Context, user *models.User) error
 }
 
 type stravaService struct {
 	config      *config.Config
 	httpClient  *http.Client
 	rateLimiter *RateLimiter
+	userRepo    UserRepositoryInterface
 	makeRequest func(method, endpoint, accessToken string, params url.Values) ([]byte, error)
 }
 
@@ -273,7 +281,7 @@ func (rl *RateLimiter) Allow() bool {
 	return false
 }
 
-func NewStravaService(cfg *config.Config) StravaService {
+func NewStravaService(cfg *config.Config, userRepo UserRepositoryInterface) StravaService {
 	// Strava API limits: 100 requests per 15 minutes, 1000 requests per day
 	// We'll implement the 15-minute limit here
 	rateLimiter := NewRateLimiter(100, 15*time.Minute)
@@ -284,6 +292,7 @@ func NewStravaService(cfg *config.Config) StravaService {
 			Timeout: 30 * time.Second,
 		},
 		rateLimiter: rateLimiter,
+		userRepo:    userRepo,
 	}
 
 	// Set the default makeRequest implementation
@@ -293,13 +302,14 @@ func NewStravaService(cfg *config.Config) StravaService {
 }
 
 // NewTestStravaService creates a Strava service for testing with a custom base URL
-func NewTestStravaService(cfg *config.Config, baseURL string) StravaService {
+func NewTestStravaService(cfg *config.Config, baseURL string, userRepo UserRepositoryInterface) StravaService {
 	service := &stravaService{
 		config: cfg,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		rateLimiter: NewRateLimiter(100, 15*time.Minute),
+		userRepo:    userRepo,
 	}
 
 	// Override makeRequest for testing
@@ -336,6 +346,46 @@ func NewTestStravaService(cfg *config.Config, baseURL string) StravaService {
 	}
 
 	return service
+}
+
+// executeWithTokenRefresh wraps API calls with automatic token refresh on 401 errors
+func (s *stravaService) executeWithTokenRefresh(user *models.User, apiCall func(string) (interface{}, error)) (interface{}, error) {
+	// First attempt with current token
+	result, err := apiCall(user.AccessToken)
+	
+	// If we get a token expired error, try to refresh
+	if err != nil && (errors.Is(err, ErrTokenExpired) || errors.Is(err, ErrInvalidToken)) {
+		log.Printf("Token expired for user %s, attempting refresh", user.ID)
+		
+		// Attempt to refresh the token
+		tokenResp, refreshErr := s.RefreshToken(user.RefreshToken)
+		if refreshErr != nil {
+			log.Printf("Token refresh failed for user %s: %v", user.ID, refreshErr)
+			return nil, fmt.Errorf("failed to refresh Strava token: %w", refreshErr)
+		}
+		
+		// Update user with new tokens
+		user.AccessToken = tokenResp.AccessToken
+		user.RefreshToken = tokenResp.RefreshToken
+		user.TokenExpiry = time.Unix(tokenResp.ExpiresAt, 0)
+		
+		// Save updated tokens to database
+		ctx := context.Background()
+		if updateErr := s.userRepo.Update(ctx, user); updateErr != nil {
+			log.Printf("Failed to update user tokens in database for user %s: %v", user.ID, updateErr)
+			return nil, fmt.Errorf("failed to save refreshed tokens: %w", updateErr)
+		}
+		
+		log.Printf("Successfully refreshed tokens for user %s", user.ID)
+		
+		// Retry the original API call with new token
+		result, err = apiCall(user.AccessToken)
+		if err != nil {
+			return nil, fmt.Errorf("API call failed even after token refresh: %w", err)
+		}
+	}
+	
+	return result, err
 }
 
 func (s *stravaService) defaultMakeRequest(method, endpoint string, accessToken string, params url.Values) ([]byte, error) {
@@ -407,93 +457,130 @@ func (s *stravaService) defaultMakeRequest(method, endpoint string, accessToken 
 	}
 }
 
-func (s *stravaService) GetAthleteProfile(accessToken string) (*StravaAthlete, error) {
-	body, err := s.makeRequest("GET", "/athlete", accessToken, nil)
+func (s *stravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
+	apiCall := func(accessToken string) (interface{}, error) {
+		body, err := s.makeRequest("GET", "/athlete", accessToken, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get athlete profile: %w", err)
+		}
+
+		var athlete StravaAthlete
+		if err := json.Unmarshal(body, &athlete); err != nil {
+			return nil, fmt.Errorf("failed to parse athlete profile: %w", err)
+		}
+
+		return &athlete, nil
+	}
+
+	result, err := s.executeWithTokenRefresh(user, apiCall)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get athlete profile: %w", err)
+		return nil, err
 	}
 
-	var athlete StravaAthlete
-	if err := json.Unmarshal(body, &athlete); err != nil {
-		return nil, fmt.Errorf("failed to parse athlete profile: %w", err)
-	}
-
-	return &athlete, nil
+	return result.(*StravaAthlete), nil
 }
 
-func (s *stravaService) GetActivities(accessToken string, params ActivityParams) ([]*StravaActivity, error) {
-	urlParams := url.Values{}
+func (s *stravaService) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
+	apiCall := func(accessToken string) (interface{}, error) {
+		urlParams := url.Values{}
 
-	if params.Before != nil {
-		urlParams.Set("before", strconv.FormatInt(params.Before.Unix(), 10))
-	}
-	if params.After != nil {
-		urlParams.Set("after", strconv.FormatInt(params.After.Unix(), 10))
-	}
-	if params.Page > 0 {
-		urlParams.Set("page", strconv.Itoa(params.Page))
-	}
-	if params.PerPage > 0 {
-		urlParams.Set("per_page", strconv.Itoa(params.PerPage))
+		if params.Before != nil {
+			urlParams.Set("before", strconv.FormatInt(params.Before.Unix(), 10))
+		}
+		if params.After != nil {
+			urlParams.Set("after", strconv.FormatInt(params.After.Unix(), 10))
+		}
+		if params.Page > 0 {
+			urlParams.Set("page", strconv.Itoa(params.Page))
+		}
+		if params.PerPage > 0 {
+			urlParams.Set("per_page", strconv.Itoa(params.PerPage))
+		}
+
+		body, err := s.makeRequest("GET", "/athlete/activities", accessToken, urlParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get activities: %w", err)
+		}
+
+		var activities []*StravaActivity
+		if err := json.Unmarshal(body, &activities); err != nil {
+			return nil, fmt.Errorf("failed to parse activities: %w", err)
+		}
+
+		return activities, nil
 	}
 
-	body, err := s.makeRequest("GET", "/athlete/activities", accessToken, urlParams)
+	result, err := s.executeWithTokenRefresh(user, apiCall)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get activities: %w", err)
+		return nil, err
 	}
 
-	var activities []*StravaActivity
-	if err := json.Unmarshal(body, &activities); err != nil {
-		return nil, fmt.Errorf("failed to parse activities: %w", err)
-	}
-
-	return activities, nil
+	return result.([]*StravaActivity), nil
 }
 
-func (s *stravaService) GetActivityDetail(accessToken string, activityID int64) (*StravaActivityDetail, error) {
-	endpoint := fmt.Sprintf("/activities/%d", activityID)
+func (s *stravaService) GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error) {
+	apiCall := func(accessToken string) (interface{}, error) {
+		endpoint := fmt.Sprintf("/activities/%d", activityID)
 
-	body, err := s.makeRequest("GET", endpoint, accessToken, nil)
+		body, err := s.makeRequest("GET", endpoint, accessToken, nil)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to get activity detail: %w", err)
+		}
+
+		var activity StravaActivityDetail
+		if err := json.Unmarshal(body, &activity); err != nil {
+			return nil, fmt.Errorf("failed to parse activity detail: %w", err)
+		}
+
+		return &activity, nil
+	}
+
+	result, err := s.executeWithTokenRefresh(user, apiCall)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get activity detail: %w", err)
+		return nil, err
 	}
 
-	var activity StravaActivityDetail
-	if err := json.Unmarshal(body, &activity); err != nil {
-		return nil, fmt.Errorf("failed to parse activity detail: %w", err)
-	}
-
-	return &activity, nil
+	return result.(*StravaActivityDetail), nil
 }
 
-func (s *stravaService) GetActivityStreams(accessToken string, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
-	endpoint := fmt.Sprintf("/activities/%d/streams", activityID)
+func (s *stravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
+	apiCall := func(accessToken string) (interface{}, error) {
+		endpoint := fmt.Sprintf("/activities/%d/streams", activityID)
 
-	params := url.Values{}
-	params.Set("keys", strings.Join(streamTypes, ","))
-	if resolution != "" {
-		params.Set("resolution", resolution)
+		params := url.Values{}
+		params.Set("keys", strings.Join(streamTypes, ","))
+		if resolution != "" {
+			params.Set("resolution", resolution)
+		}
+		params.Set("key_by_type", "true")
+
+		body, err := s.makeRequest("GET", endpoint, accessToken, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get activity streams: %w", err)
+		}
+
+		// First unmarshal into the raw response format
+		var rawStreams StravaStreamsResponse
+		if err := json.Unmarshal(body, &rawStreams); err != nil {
+			return nil, fmt.Errorf("failed to parse activity streams response: %w", err)
+		}
+
+		// Convert to our structured format
+		streams, err := parseStreamsResponse(rawStreams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert activity streams: %w", err)
+		}
+
+		return streams, nil
 	}
-	params.Set("key_by_type", "true")
 
-	body, err := s.makeRequest("GET", endpoint, accessToken, params)
+	result, err := s.executeWithTokenRefresh(user, apiCall)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get activity streams: %w", err)
+		return nil, err
 	}
 
-	// First unmarshal into the raw response format
-	var rawStreams StravaStreamsResponse
-	if err := json.Unmarshal(body, &rawStreams); err != nil {
-		return nil, fmt.Errorf("failed to parse activity streams response: %w", err)
-	}
-
-	// Convert to our structured format
-	streams, err := parseStreamsResponse(rawStreams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert activity streams: %w", err)
-	}
-
-	return streams, nil
+	return result.(*StravaStreams), nil
 }
 
 func (s *stravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {

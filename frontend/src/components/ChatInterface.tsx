@@ -21,6 +21,7 @@ export default function ChatInterface() {
   const [sessionError, setSessionError] = useState<unknown>(null);
   const [messageError, setMessageError] = useState<unknown>(null);
   const [streamingError, setStreamingError] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -260,6 +261,21 @@ export default function ChatInterface() {
     });
   };
 
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await apiClient.logout();
+      // Redirect to landing page after successful logout
+      navigate('/');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Even if logout fails, redirect to landing page to clear local state
+      navigate('/');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
   if (!sessionId) {
     return (
       <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
@@ -286,9 +302,25 @@ export default function ChatInterface() {
 
       <div className='flex-1 flex flex-col'>
         {/* Header */}
-        <div className='bg-white border-b border-gray-200 p-4'>
-          <h1 className='text-xl font-semibold text-gray-800'>Bodda AI Coach</h1>
-          <p className='text-sm text-gray-600'>Your personal running and cycling coach</p>
+        <div className='bg-white border-b border-gray-200 p-4 flex justify-between items-center'>
+          <div>
+            <h1 className='text-xl font-semibold text-gray-800'>Bodda AI Coach</h1>
+            <p className='text-sm text-gray-600'>Your personal running and cycling coach</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className='bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2'
+          >
+            {isLoggingOut ? (
+              <>
+                <LoadingSpinner size='sm' />
+                <span>Logging out...</span>
+              </>
+            ) : (
+              <span>Logout</span>
+            )}
+          </button>
         </div>
 
         {/* Messages Area */}

@@ -35,7 +35,7 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	
 	// Initialize services
 	authService := services.NewAuthService(cfg, repo.User)
-	stravaService := services.NewStravaService(cfg)
+	stravaService := services.NewStravaService(cfg, repo.User)
 	logbookService := services.NewLogbookService(repo.Logbook)
 	chatService := services.NewChatService(repo)
 	aiService := services.NewAIService(cfg, stravaService, logbookService)

@@ -81,6 +81,7 @@ graph TB
   - Markdown rendering
   - Auto-scroll to latest messages
   - Scrolls automatically if needed user or coach sends new message
+  - Header with logout button for easy session termination
 
 #### 3. Session Sidebar Component
 - **Purpose:** Navigation between conversation sessions
@@ -108,6 +109,7 @@ type AuthService interface {
     HandleStravaOAuth(code string) (*User, error)
     ValidateToken(token string) (*User, error)
     RefreshStravaToken(user *User) error
+    LogoutUser(userID string) error
 }
 ```
 
@@ -124,12 +126,15 @@ type ChatService interface {
 #### 3. Strava Service
 ```go
 type StravaService interface {
-    // Core Strava API interactions
-    GetAthleteProfile(accessToken string) (*StravaAthlete, error)
-    GetActivities(accessToken string, params ActivityParams) ([]*StravaActivity, error)
-    GetActivityDetail(accessToken string, activityID int64) (*StravaActivityDetail, error)
-    GetActivityStreams(accessToken string, activityID int64, streamTypes []string) (*StravaStreams, error)
+    // Core Strava API interactions with automatic token refresh
+    GetAthleteProfile(user *User) (*StravaAthlete, error)
+    GetActivities(user *User, params ActivityParams) ([]*StravaActivity, error)
+    GetActivityDetail(user *User, activityID int64) (*StravaActivityDetail, error)
+    GetActivityStreams(user *User, activityID int64, streamTypes []string) (*StravaStreams, error)
     RefreshToken(refreshToken string) (*TokenResponse, error)
+    
+    // Internal method for handling token refresh automatically
+    executeWithTokenRefresh(user *User, apiCall func(string) (interface{}, error)) (interface{}, error)
 }
 ```
 
@@ -264,7 +269,8 @@ CREATE TABLE athlete_logbooks (
 ### Authentication
 - `GET /auth/strava` - Initiate Strava OAuth
 - `GET /auth/callback` - Handle OAuth callback
-- `POST /auth/logout` - Logout user
+- `POST /auth/logout` - Logout user and clear session
+- `GET /auth/check` - Check authentication status and refresh tokens if needed
 
 ### Sessions
 - `GET /api/sessions` - Get user sessions
@@ -432,6 +438,47 @@ type ErrorResponse struct {
 - AI service mocking for predictable responses
 - Automated test data cleanup
 
+## Token Management Architecture
+
+### Automatic Token Refresh Strategy
+
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant Backend
+    participant Strava as Strava API
+    participant DB as Database
+
+    Frontend->>Backend: API request with user token
+    Backend->>Strava: Make API call with stored token
+    
+    alt API returns 401 (token expired)
+        Backend->>Strava: Refresh token request
+        Strava-->>Backend: New access token
+        Backend->>DB: Update stored tokens
+        Backend->>Strava: Retry original API call
+        Backend-->>Frontend: Return data
+    else API call successful
+        Backend-->>Frontend: Return data
+    end
+```
+
+### Token Refresh Implementation Details
+
+**Reactive Refresh Strategy:**
+- Handle 401 errors from Strava API calls automatically
+- Attempt token refresh when authentication failures occur
+- Retry original request with new tokens
+- Update database with refreshed tokens immediately
+- Log user out if refresh fails (invalid refresh token)
+- Transparent to the user - they see a brief loading state during refresh
+
+**Frontend Logout Flow:**
+- Logout button in chat interface header
+- Clear JWT tokens from browser storage
+- Redirect to landing page
+- Preserve user data (conversations, logbook) for future sessions
+
 ## Security Considerations
 
 ### Authentication & Authorization
@@ -439,12 +486,14 @@ type ErrorResponse struct {
 - JWT tokens for session management
 - CORS configuration for frontend domain
 - Rate limiting on API endpoints
+- Automatic token refresh with secure retry logic
 
 ### Data Protection
 - User data encryption in database
 - Secure transmission (HTTPS only)
-- Token refresh mechanism for Strava API
+- Automatic reactive token refresh mechanism for Strava API
 - Input validation and sanitization
+- Secure logout with JWT token cleanup (preserves user data)
 
 ### AI Safety
 - Content filtering for inappropriate responses

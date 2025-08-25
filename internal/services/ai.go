@@ -16,7 +16,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-const MODEL = openai.O3
+const MODEL = openai.GPT5
 
 // MessageContext contains all the context needed for AI processing
 type MessageContext struct {
@@ -49,7 +49,7 @@ type IterativeProcessor struct {
 // NewIterativeProcessor creates a new iterative processor with default settings
 func NewIterativeProcessor(msgCtx *MessageContext, progressCallback func(string)) *IterativeProcessor {
 	return &IterativeProcessor{
-		MaxRounds:        5,
+		MaxRounds:        10,
 		CurrentRound:     0,
 		ProgressCallback: progressCallback,
 		ToolResults:      make([][]ToolResult, 0),
@@ -644,20 +644,23 @@ func (s *aiService) shouldContinueAnalysis(processor *IterativeProcessor, toolCa
 		return false, "max_rounds"
 	}
 
+	// for now we will continue as long as there is tool calls and max round not reached
+	return true, "continue_analysis"
+
 	// Analyze the nature of tool calls to determine if more analysis is beneficial
-	analysisDepth := s.assessAnalysisDepth(processor, toolCalls)
+	// analysisDepth := s.assessAnalysisDepth(processor, toolCalls)
 
 	// Continue if we're still in exploratory phase and haven't reached sufficient depth
-	if analysisDepth < 3 && processor.CurrentRound < processor.MaxRounds-1 {
-		return true, "continue_analysis"
-	}
+	// if analysisDepth < 3 && processor.CurrentRound < processor.MaxRounds-1 {
+	// 	return true, "continue_analysis"
+	// }
 
 	// Continue if tool calls suggest deeper analysis is needed
-	if s.toolCallsSuggestDeeperAnalysis(toolCalls) && processor.CurrentRound < processor.MaxRounds-1 {
-		return true, "deeper_analysis"
-	}
+	// if s.toolCallsSuggestDeeperAnalysis(toolCalls) && processor.CurrentRound < processor.MaxRounds-1 {
+	// 	return true, "deeper_analysis"
+	// }
 
-	return false, "sufficient_data"
+	// return false, "sufficient_data"
 }
 
 // assessAnalysisDepth evaluates how deep the current analysis has gone
@@ -1162,7 +1165,7 @@ func (s *aiService) executeGetAthleteProfile(ctx context.Context, msgCtx *Messag
 		return nil, fmt.Errorf("user context is required")
 	}
 
-	profile, err := s.stravaService.GetAthleteProfile(msgCtx.User.AccessToken)
+	profile, err := s.stravaService.GetAthleteProfile(msgCtx.User)
 	if err != nil {
 		return nil, s.handleStravaError(err, "athlete profile")
 	}
@@ -1179,7 +1182,7 @@ func (s *aiService) executeGetRecentActivities(ctx context.Context, msgCtx *Mess
 		PerPage: perPage,
 	}
 
-	activities, err := s.stravaService.GetActivities(msgCtx.User.AccessToken, params)
+	activities, err := s.stravaService.GetActivities(msgCtx.User, params)
 	if err != nil {
 		return nil, s.handleStravaError(err, "recent activities")
 	}
@@ -1192,7 +1195,7 @@ func (s *aiService) executeGetActivityDetails(ctx context.Context, msgCtx *Messa
 		return nil, fmt.Errorf("user context is required")
 	}
 
-	details, err := s.stravaService.GetActivityDetail(msgCtx.User.AccessToken, activityID)
+	details, err := s.stravaService.GetActivityDetail(msgCtx.User, activityID)
 	if err != nil {
 		return nil, s.handleStravaError(err, "activity details")
 	}
@@ -1205,7 +1208,7 @@ func (s *aiService) executeGetActivityStreams(ctx context.Context, msgCtx *Messa
 		return nil, fmt.Errorf("user context is required")
 	}
 
-	streams, err := s.stravaService.GetActivityStreams(msgCtx.User.AccessToken, activityID, streamTypes, resolution)
+	streams, err := s.stravaService.GetActivityStreams(msgCtx.User, activityID, streamTypes, resolution)
 	if err != nil {
 		return nil, s.handleStravaError(err, "activity streams")
 	}

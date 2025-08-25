@@ -108,3 +108,29 @@ Bodda is an AI-powered running and cycling coach application that integrates wit
 4. WHEN multiple tool call rounds are needed THEN the system SHALL stream intermediate progress updates to the user
 5. WHEN iterative tool calls exceed reasonable limits THEN the system SHALL prevent infinite loops with appropriate safeguards
 6. WHEN tool calls fail during iteration THEN the system SHALL handle errors gracefully and continue with available data
+
+### Requirement 10
+
+**User Story:** As a user, I want the system to automatically refresh my Strava authentication tokens, so that I can continue using the coaching service without manual re-authentication interruptions.
+
+#### Acceptance Criteria
+
+1. WHEN a Strava API call receives a token expiration error THEN the system SHALL automatically attempt to refresh the access token using the stored refresh token
+2. WHEN token refresh is successful THEN the system SHALL update the stored tokens and retry the original API request
+3. WHEN token refresh fails THEN the system SHALL log the user out and redirect them to re-authenticate with Strava
+4. WHEN tokens are approaching expiration THEN the system SHALL proactively refresh them before they expire
+5. WHEN the system detects invalid or revoked tokens THEN the system SHALL handle the error gracefully and prompt for re-authentication
+6. WHEN token refresh occurs THEN the system SHALL maintain the user's current session and continue their coaching interaction seamlessly
+
+### Requirement 11
+
+**User Story:** As an authenticated user, I want a logout button in the chat interface header, so that I can easily sign out of my account when I'm finished with my coaching session.
+
+#### Acceptance Criteria
+
+1. WHEN a user is in the chat interface THEN the system SHALL display a logout button in the header area
+2. WHEN a user clicks the logout button THEN the system SHALL clear their authentication session and redirect them to the landing page
+3. WHEN logout occurs THEN the system SHALL clear any stored authentication tokens from the browser
+4. WHEN a user logs out THEN the system SHALL ensure they cannot access protected routes without re-authentication
+5. WHEN the logout button is displayed THEN the system SHALL position it prominently but not interfere with the main chat functionality
+6. WHEN logout is successful THEN the system SHALL provide visual confirmation that the user has been signed out

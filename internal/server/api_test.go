@@ -136,8 +136,8 @@ func (m *MockLogbookService) CreateInitialLogbook(ctx context.Context, userID st
 	return args.Get(0).(*models.AthleteLogbook), args.Error(1)
 }
 
-func (m *MockLogbookService) UpdateLogbook(ctx context.Context, userID string, updates services.LogbookUpdate) (*models.AthleteLogbook, error) {
-	args := m.Called(ctx, userID, updates)
+func (m *MockLogbookService) UpdateLogbook(ctx context.Context, userID string, content string) (*models.AthleteLogbook, error) {
+	args := m.Called(ctx, userID, content)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -152,10 +152,7 @@ func (m *MockLogbookService) UpsertLogbook(ctx context.Context, userID string, c
 	return args.Get(0).(*models.AthleteLogbook), args.Error(1)
 }
 
-func (m *MockLogbookService) ValidateLogbookData(updates services.LogbookUpdate) error {
-	args := m.Called(updates)
-	return args.Error(0)
-}
+
 
 // Helper function to create a test server with mocked services
 func createTestServer() (*Server, *MockChatService, *MockAIService, *MockLogbookService) {

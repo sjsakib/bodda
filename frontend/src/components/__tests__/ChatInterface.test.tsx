@@ -451,4 +451,100 @@ describe('ChatInterface', () => {
       expect(timeElements.length).toBeGreaterThan(0)
     })
   })
+
+  it('handles logout functionality', async () => {
+    // Mock auth check call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ authenticated: true, user: { id: 'user-1' } })
+    })
+
+    // Mock sessions call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([])
+    })
+
+    // Mock messages call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([])
+    })
+
+    renderChatInterface()
+
+    // Find and click logout button
+    const logoutButton = screen.getByText('Logout')
+    expect(logoutButton).toBeInTheDocument()
+
+    // Mock logout API call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ message: 'logged out successfully' })
+    })
+
+    fireEvent.click(logoutButton)
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/')
+    })
+  })
+
+  it('shows loading state during logout', async () => {
+    // Mock auth check call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ authenticated: true, user: { id: 'user-1' } })
+    })
+
+    // Mock sessions call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([])
+    })
+
+    // Mock messages call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([])
+    })
+
+    renderChatInterface()
+
+    const logoutButton = screen.getByText('Logout')
+
+    // Mock slow logout API call
+    let resolveLogout: (value: any) => void
+    const logoutPromise = new Promise(resolve => {
+      resolveLogout = resolve
+    })
+    mockFetch.mockReturnValueOnce(logoutPromise)
+
+    fireEvent.click(logoutButton)
+
+    // Check loading state
+    await waitFor(() => {
+      expect(screen.getByText('Logging out...')).toBeInTheDocument()
+    })
+
+    // Resolve the logout
+    resolveLogout!({
+      ok: true,
+      json: () => Promise.resolve({ message: 'logged out successfully' })
+    })
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/')
+    })
+  })
 })

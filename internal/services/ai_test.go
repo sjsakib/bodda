@@ -35,23 +35,23 @@ type MockStravaService struct {
 	mock.Mock
 }
 
-func (m *MockStravaService) GetAthleteProfile(accessToken string) (*StravaAthlete, error) {
-	args := m.Called(accessToken)
+func (m *MockStravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
+	args := m.Called(user)
 	return args.Get(0).(*StravaAthlete), args.Error(1)
 }
 
-func (m *MockStravaService) GetActivities(accessToken string, params ActivityParams) ([]*StravaActivity, error) {
-	args := m.Called(accessToken, params)
+func (m *MockStravaService) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
+	args := m.Called(user, params)
 	return args.Get(0).([]*StravaActivity), args.Error(1)
 }
 
-func (m *MockStravaService) GetActivityDetail(accessToken string, activityID int64) (*StravaActivityDetail, error) {
-	args := m.Called(accessToken, activityID)
+func (m *MockStravaService) GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error) {
+	args := m.Called(user, activityID)
 	return args.Get(0).(*StravaActivityDetail), args.Error(1)
 }
 
-func (m *MockStravaService) GetActivityStreams(accessToken string, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
-	args := m.Called(accessToken, activityID, streamTypes, resolution)
+func (m *MockStravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
+	args := m.Called(user, activityID, streamTypes, resolution)
 	return args.Get(0).(*StravaStreams), args.Error(1)
 }
 
@@ -254,7 +254,9 @@ func TestAIService_ExecuteGetAthleteProfile(t *testing.T) {
 		User: user,
 	}
 	
-	service.mockStrava.On("GetAthleteProfile", "test-token").Return(expectedProfile, nil)
+	service.mockStrava.On("GetAthleteProfile", mock.MatchedBy(func(u *models.User) bool {
+		return u.AccessToken == "test-token"
+	})).Return(expectedProfile, nil)
 	
 	result, err := service.executeGetAthleteProfile(ctx, msgCtx)
 	
@@ -300,7 +302,9 @@ func TestAIService_ExecuteGetRecentActivities(t *testing.T) {
 		PerPage: 30,
 	}
 	
-	service.mockStrava.On("GetActivities", "test-token", expectedParams).Return(expectedActivities, nil)
+	service.mockStrava.On("GetActivities", mock.MatchedBy(func(u *models.User) bool {
+		return u.AccessToken == "test-token"
+	}), expectedParams).Return(expectedActivities, nil)
 	
 	result, err := service.executeGetRecentActivities(ctx, msgCtx, 30)
 	
@@ -442,7 +446,9 @@ func TestAIService_ExecuteTools(t *testing.T) {
 		Firstname: "John",
 		Lastname:  "Doe",
 	}
-	service.mockStrava.On("GetAthleteProfile", "test-token").Return(expectedProfile, nil)
+	service.mockStrava.On("GetAthleteProfile", mock.MatchedBy(func(u *models.User) bool {
+		return u.AccessToken == "test-token"
+	})).Return(expectedProfile, nil)
 	
 	toolCalls := []openai.ToolCall{
 		{
@@ -609,7 +615,9 @@ func TestAIService_ToolExecutionErrorHandling(t *testing.T) {
 	}
 	
 	// Mock Strava service to return an error
-	service.mockStrava.On("GetAthleteProfile", "test-token").Return((*StravaAthlete)(nil), fmt.Errorf("Strava API error"))
+	service.mockStrava.On("GetAthleteProfile", mock.MatchedBy(func(u *models.User) bool {
+		return u.AccessToken == "test-token"
+	})).Return((*StravaAthlete)(nil), fmt.Errorf("Strava API error"))
 	
 	toolCalls := []openai.ToolCall{
 		{

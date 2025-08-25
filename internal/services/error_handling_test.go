@@ -62,10 +62,17 @@ func TestStravaServiceErrorHandling(t *testing.T) {
 			testServer := createTestServer(tt.statusCode, tt.responseBody)
 			defer testServer.Close()
 
-			service := NewTestStravaService(cfg, testServer.URL)
+			mockUserRepo := &MockStravaUserRepository{}
+			service := NewTestStravaService(cfg, testServer.URL, mockUserRepo)
 
 			// Test GetAthleteProfile
-			_, err := service.GetAthleteProfile("test_token")
+			testUser := &models.User{
+				ID:           "test-user-id",
+				AccessToken:  "test_token",
+				RefreshToken: "test_refresh_token",
+				TokenExpiry:  time.Now().Add(time.Hour),
+			}
+			_, err := service.GetAthleteProfile(testUser)
 			if !errors.Is(err, tt.expectedError) {
 				t.Errorf("Expected error %v, got %v", tt.expectedError, err)
 			}
@@ -243,19 +250,19 @@ func TestRateLimiterErrorHandling(t *testing.T) {
 
 type mockStravaService struct{}
 
-func (m *mockStravaService) GetAthleteProfile(accessToken string) (*StravaAthlete, error) {
+func (m *mockStravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
 	return nil, ErrTokenExpired
 }
 
-func (m *mockStravaService) GetActivities(accessToken string, params ActivityParams) ([]*StravaActivity, error) {
+func (m *mockStravaService) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
 	return nil, ErrRateLimitExceeded
 }
 
-func (m *mockStravaService) GetActivityDetail(accessToken string, activityID int64) (*StravaActivityDetail, error) {
+func (m *mockStravaService) GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error) {
 	return nil, ErrActivityNotFound
 }
 
-func (m *mockStravaService) GetActivityStreams(accessToken string, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
+func (m *mockStravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
 	return nil, ErrServiceUnavailable
 }
 
