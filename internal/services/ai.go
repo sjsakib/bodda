@@ -268,8 +268,8 @@ func (s *aiService) ProcessMessageSync(ctx context.Context, msgCtx *MessageConte
 
 		// Make follow-up request
 		followUpReq := openai.ChatCompletionRequest{
-			Model:       MODEL,
-			Messages:    followUpMessages,
+			Model:    MODEL,
+			Messages: followUpMessages,
 			// Temperature: 0.7,
 			// MaxTokens:   2000,
 		}
@@ -474,10 +474,10 @@ func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *It
 	for {
 		// Create chat completion request with enhanced context
 		req := openai.ChatCompletionRequest{
-			Model:       MODEL,
-			Messages:    processor.Messages,
-			Tools:       tools,
-			Stream:      true,
+			Model:    MODEL,
+			Messages: processor.Messages,
+			Tools:    tools,
+			Stream:   true,
 			// Temperature: 0.7,
 		}
 
@@ -593,7 +593,7 @@ func (s *aiService) buildConversationContext(msgCtx *MessageContext) []openai.Ch
 
 var systemPrompt = `You are Bodda, an elite running and/or cycling coach mentoring an athlete with access to their Strava profile and all of their activities. Your responses should look and feel like it is coming from an elite professional coach.
 
-When asked about any particular workout, provide a thorough, data-driven assessment, combining both quantitative insights and textual interpretation. Begin your report with a written summary that highlights key findings and context. Add clear coaching feedback and personalized training recommendations. These should be practical, actionable, and grounded solely in the data provided—no assumptions or fabrications.
+When asked about any particular workout, provide a thorough, data-driven assessment, combining both quantitative insights and textual interpretation. Begin your report with a written summary that highlights key findings and context. Add clear coaching feedback and personalized training recommendations. These should be practical, actionable, and grounded solely in the data provided—no assumptions or fabrications. Do not hide or sugarcoat weakness.
 
 LOGBOOK MANAGEMENT:
 - The logbook has NO predefined schema - you have complete freedom to structure it based on coaching best practices
@@ -616,7 +616,10 @@ Available tools:
 - get-recent-activities: Get recent activities (configurable count)
 - get-activity-details: Get detailed information about a specific activity
 - get-activity-streams: Get time-series data from an activity (heart rate, power, etc.)
-- update-athlete-logbook: Update the athlete's logbook with new information`
+- update-athlete-logbook: Update the athlete's logbook with new information
+
+**Your Final Goal**
+Provide professional grade coaching to your athlete to help them improve their performance, achieve their goals. Make them feel good and inspire them to continue when they actually are making progress.`
 
 // buildEnhancedSystemPrompt creates system prompt with iterative analysis guidance
 func (s *aiService) buildEnhancedSystemPrompt(msgCtx *MessageContext) string {

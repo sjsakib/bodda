@@ -3,9 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { apiClient } from '../services/api';
 import { Message, Session } from '../services/api';
 import SessionSidebar from './SessionSidebar';
+import MobileSessionMenu from './MobileSessionMenu';
 import { ErrorDisplay, LoadingSpinner } from './ErrorBoundary';
 import { MessageErrorHandler } from './ApiErrorHandler';
 import { SafeMarkdownRenderer } from './MarkdownRenderer';
+import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
+import { HamburgerIcon } from './HamburgerIcon';
+import SuggestionPills from './SuggestionPills';
 
 export default function ChatInterface() {
   const params = useParams<{ sessionId: string }>();
@@ -23,6 +27,10 @@ export default function ChatInterface() {
   const [streamingError, setStreamingError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Responsive layout hook
+  const { isMobile, isMobileMenuOpen, toggleMobileMenu, closeMobileMenu } =
+    useResponsiveLayout();
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -121,6 +129,10 @@ export default function ChatInterface() {
       if (newSession && newSession.id) {
         setSessions(prev => [newSession, ...prev]);
         navigate(`/chat/${newSession.id}`);
+        // Close mobile menu after creating session
+        if (isMobile) {
+          closeMobileMenu();
+        }
       } else {
         throw new Error('Invalid session response from server');
       }
@@ -276,6 +288,16 @@ export default function ChatInterface() {
     }
   };
 
+  // Handle suggestion pill clicks - Requirements 2.1, 2.2, 2.3
+  const handlePillClick = (text: string) => {
+    setInputText(text);
+    // Focus the input field after populating text
+    const textArea = document.querySelector('textarea');
+    if (textArea) {
+      textArea.focus();
+    }
+  };
+
   if (!sessionId) {
     return (
       <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
@@ -289,12 +311,29 @@ export default function ChatInterface() {
 
   return (
     <div className='flex h-screen bg-gray-50'>
-      <SessionSidebar
+      {/* Desktop Sidebar - Hidden on mobile */}
+      {!isMobile && (
+        <SessionSidebar
+          sessions={sessions}
+          currentSessionId={sessionId}
+          onCreateSession={createNewSession}
+          isCreatingSession={isCreatingSession}
+          onSelectSession={id => navigate(`/chat/${id}`)}
+          isLoading={isLoadingSessions}
+          error={sessionError}
+          onRetryLoad={loadSessions}
+        />
+      )}
+
+      {/* Mobile Session Menu */}
+      <MobileSessionMenu
         sessions={sessions}
         currentSessionId={sessionId}
         onCreateSession={createNewSession}
         isCreatingSession={isCreatingSession}
         onSelectSession={id => navigate(`/chat/${id}`)}
+        isOpen={isMobileMenuOpen}
+        onClose={closeMobileMenu}
         isLoading={isLoadingSessions}
         error={sessionError}
         onRetryLoad={loadSessions}
@@ -303,9 +342,29 @@ export default function ChatInterface() {
       <div className='flex-1 flex flex-col'>
         {/* Header */}
         <div className='bg-white border-b border-gray-200 p-4 flex justify-between items-center'>
-          <div>
-            <h1 className='text-xl font-semibold text-gray-800'>Bodda AI Coach</h1>
-            <p className='text-sm text-gray-600'>Your personal running and cycling coach</p>
+          <div className='flex items-center space-x-3'>
+            {/* Mobile Menu Button - Only shown on mobile */}
+            {isMobile && (
+              <button
+                onClick={toggleMobileMenu}
+                className='p-2 rounded-lg hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2'
+                aria-label={isMobileMenuOpen ? 'Close session menu' : 'Open session menu'}
+                aria-expanded={isMobileMenuOpen}
+                aria-controls="mobile-session-menu"
+                aria-describedby="menu-button-help"
+              >
+                <HamburgerIcon className='text-gray-600' />
+              </button>
+            )}
+            <div id="menu-button-help" className="sr-only">
+              {isMobile ? 'Access your chat sessions and create new conversations' : ''}
+            </div>
+            <div>
+              <h1 className='text-xl font-semibold text-gray-800'>Bodda AI Coach</h1>
+              <p className='text-sm text-gray-600'>
+                Your personal running and cycling coach
+              </p>
+            </div>
           </div>
           <button
             onClick={handleLogout}
@@ -372,12 +431,14 @@ export default function ChatInterface() {
                   }`}
                 >
                   {message.role === 'assistant' ? (
-                    <SafeMarkdownRenderer 
+                    <SafeMarkdownRenderer
                       content={message.content}
-                      className="max-w-none"
+                      className='max-w-none'
                     />
                   ) : (
-                    <div className='whitespace-pre-wrap text-sm sm:text-base'>{message.content}</div>
+                    <div className='whitespace-pre-wrap text-sm sm:text-base'>
+                      {message.content}
+                    </div>
                   )}
                   <div
                     className={`text-xs mt-2 ${
@@ -405,9 +466,17 @@ export default function ChatInterface() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Suggestion Pills - Requirements 1.1, 1.2, 1.3, 1.4 */}
+        {messages.length === 0 && inputText === '' && !isLoadingMessages && !messageError && (
+          <SuggestionPills onPillClick={handlePillClick} />
+        )}
+
         {/* Input Area */}
-        <div className='bg-white border-t border-gray-200 p-4'>
-          <form onSubmit={handleSubmit} className='flex space-x-3'>
+        <div className={`bg-white border-t border-gray-200 ${isMobile ? 'p-3' : 'p-4'}`}>
+          <form
+            onSubmit={handleSubmit}
+            className={`flex ${isMobile ? 'space-x-2' : 'space-x-3'}`}
+          >
             <textarea
               value={inputText}
               onChange={e => setInputText(e.target.value)}
@@ -417,17 +486,31 @@ export default function ChatInterface() {
                   handleSubmit(e);
                 }
               }}
-              placeholder='Ask your AI coach anything about training, analyze your activities, or get personalized advice...'
-              className='flex-1 resize-none border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+              placeholder={
+                isMobile
+                  ? 'Ask your AI coach...'
+                  : 'Ask your AI coach anything about training, analyze your activities, or get personalized advice...'
+              }
+              className={`flex-1 resize-none border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
+                isMobile ? 'text-sm px-3 py-3 min-h-[44px]' : 'text-base px-4 py-3'
+              }`}
               rows={1}
               disabled={isStreaming}
+              style={{
+                minHeight: isMobile ? '44px' : 'auto',
+                lineHeight: isMobile ? '1.4' : '1.5',
+              }}
             />
             <button
               type='submit'
               disabled={!inputText.trim() || isStreaming}
-              className='bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors'
+              className={`bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors ${
+                isMobile
+                  ? 'px-4 py-3 text-sm min-h-[44px] min-w-[60px]'
+                  : 'px-6 py-3 text-base'
+              }`}
             >
-              {isStreaming ? 'Sending...' : 'Send'}
+              {isStreaming ? (isMobile ? '...' : 'Sending...') : 'Send'}
             </button>
           </form>
         </div>
