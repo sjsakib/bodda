@@ -46,6 +46,7 @@ declare module 'react-vega' {
   }
 
   export const VegaLite: ComponentType<VegaLiteProps>;
+  export const VegaEmbed: ComponentType<VegaLiteProps>;
 }
 
 declare module 'vega-lite' {

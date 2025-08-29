@@ -365,12 +365,6 @@ export const ResponsiveVegaLiteDiagram: React.FC<ResponsiveVegaLiteDiagramProps>
             console.log('Module keys:', Object.keys(module));
             console.log('Module default:', module.default);
 
-            // Check all available exports
-            console.log('All module exports:', Object.keys(module));
-            console.log('Default export:', module.default);
-            console.log('VegaEmbed:', module.VegaEmbed);
-            console.log('VegaLite:', module.VegaLite);
-
             // Try different ways to get the component
             let Component = module.VegaLite || module.VegaEmbed || module.default;
 
