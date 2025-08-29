@@ -21,10 +21,10 @@ beforeEach(() => {
     callback,
   }));
 
-  global.IntersectionObserver = mockIntersectionObserver;
+  (globalThis as any).IntersectionObserver = mockIntersectionObserver;
 
   // Mock ResizeObserver
-  global.ResizeObserver = vi.fn().mockImplementation((callback) => ({
+  (globalThis as any).ResizeObserver = vi.fn().mockImplementation((callback) => ({
     observe: vi.fn(),
     unobserve: vi.fn(),
     disconnect: vi.fn(),
@@ -32,13 +32,13 @@ beforeEach(() => {
   }));
 
   // Mock performance.now
-  global.performance = {
-    ...global.performance,
+  (globalThis as any).performance = {
+    ...(globalThis as any).performance,
     now: vi.fn(() => Date.now()),
   };
 
   // Mock requestAnimationFrame
-  global.requestAnimationFrame = vi.fn((callback) => {
+  (globalThis as any).requestAnimationFrame = vi.fn((callback) => {
     setTimeout(callback, 16);
     return 1;
   });
@@ -205,7 +205,7 @@ describe('useViewportOptimization', () => {
       const callback = mockIntersectionObserver.mock.calls[0][0];
 
       // Mock performance.now to return predictable values
-      (global.performance.now as any)
+      ((globalThis as any).performance.now as any)
         .mockReturnValueOnce(1000) // Enter viewport
         .mockReturnValueOnce(1500); // Exit viewport
 
@@ -231,7 +231,7 @@ describe('useViewportOptimization', () => {
       );
 
       // Mock performance.now for render timing
-      (global.performance.now as any)
+      ((globalThis as any).performance.now as any)
         .mockReturnValueOnce(2000) // Render start
         .mockReturnValueOnce(2100); // Render end
 
@@ -295,7 +295,7 @@ describe('useDiagramPerformance', () => {
     const { result } = renderHook(() => useDiagramPerformance());
 
     // Mock slow render time
-    (global.performance.now as any)
+    ((globalThis as any).performance.now as any)
       .mockReturnValueOnce(1000)
       .mockReturnValueOnce(2500); // 1500ms render time
 
@@ -377,6 +377,6 @@ describe('useResponsiveDiagramSize', () => {
   it('sets up ResizeObserver', () => {
     renderHook(() => useResponsiveDiagramSize());
 
-    expect(global.ResizeObserver).toHaveBeenCalledWith(expect.any(Function));
+    expect((globalThis as any).ResizeObserver).toHaveBeenCalledWith(expect.any(Function));
   });
 });
