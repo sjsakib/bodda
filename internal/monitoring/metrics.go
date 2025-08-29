@@ -3,7 +3,6 @@ package monitoring
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"runtime"
 	"sync"
 	"time"

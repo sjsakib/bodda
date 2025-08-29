@@ -11,8 +11,8 @@ const originalMatchMedia = window.matchMedia
 describe('useResponsiveLayout Hook', () => {
   let mockMediaQueryList: {
     matches: boolean
-    addEventListener: vi.Mock
-    removeEventListener: vi.Mock
+    addEventListener: ReturnType<typeof vi.fn>
+    removeEventListener: ReturnType<typeof vi.fn>
   }
 
   beforeEach(() => {

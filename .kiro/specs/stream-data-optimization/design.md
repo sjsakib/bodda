@@ -78,7 +78,8 @@ type OutputFormatter interface {
 
 ```go
 type DerivedFeaturesProcessor interface {
-    ExtractFeatures(data *StravaStreams) (*DerivedFeatures, error)
+    ExtractFeatures(data *StravaStreams, laps []StravaLap) (*DerivedFeatures, error)
+    ExtractLapFeatures(data *StravaStreams, laps []StravaLap) (*LapAnalysis, error)
 }
 
 type SummaryProcessor interface {
@@ -113,6 +114,74 @@ type DerivedFeatures struct {
     Trends          []Trend               `json:"trends"`
     Spikes          []Spike               `json:"spikes"`
     SampleData      []DataPoint           `json:"sample_data"`
+    LapAnalysis     *LapAnalysis          `json:"lap_analysis,omitempty"`
+}
+
+type LapAnalysis struct {
+    TotalLaps       int                    `json:"total_laps"`
+    LapSummaries    []LapSummary          `json:"lap_summaries"`
+    LapComparisons  LapComparisons        `json:"lap_comparisons"`
+    SegmentationType string               `json:"segmentation_type"` // "laps", "distance", "time"
+}
+
+type LapSummary struct {
+    LapNumber       int                    `json:"lap_number"`
+    LapName         string                 `json:"lap_name,omitempty"`
+    StartTime       int                    `json:"start_time"`
+    EndTime         int                    `json:"end_time"`
+    Duration        int                    `json:"duration"`
+    Distance        float64                `json:"distance"`
+    ElevationGain   float64                `json:"elevation_gain,omitempty"`
+    ElevationLoss   float64                `json:"elevation_loss,omitempty"`
+    AvgSpeed        float64                `json:"avg_speed,omitempty"`
+    MaxSpeed        float64                `json:"max_speed,omitempty"`
+    AvgHeartRate    float64                `json:"avg_heart_rate,omitempty"`
+    MaxHeartRate    int                    `json:"max_heart_rate,omitempty"`
+    AvgPower        float64                `json:"avg_power,omitempty"`
+    MaxPower        int                    `json:"max_power,omitempty"`
+    AvgCadence      float64                `json:"avg_cadence,omitempty"`
+    MaxCadence      int                    `json:"max_cadence,omitempty"`
+    AvgTemperature  float64                `json:"avg_temperature,omitempty"`
+    Statistics      LapStatistics          `json:"statistics"`
+    Trends          []LapTrend            `json:"trends"`
+    Spikes          []LapSpike            `json:"spikes"`
+}
+
+type LapComparisons struct {
+    FastestLap      int                    `json:"fastest_lap"`
+    SlowestLap      int                    `json:"slowest_lap"`
+    HighestPowerLap int                    `json:"highest_power_lap,omitempty"`
+    LowestPowerLap  int                    `json:"lowest_power_lap,omitempty"`
+    HighestHRLap    int                    `json:"highest_hr_lap,omitempty"`
+    LowestHRLap     int                    `json:"lowest_hr_lap,omitempty"`
+    SpeedVariation  float64                `json:"speed_variation"`
+    PowerVariation  float64                `json:"power_variation,omitempty"`
+    HRVariation     float64                `json:"hr_variation,omitempty"`
+    ConsistencyScore float64               `json:"consistency_score"`
+}
+
+type LapStatistics struct {
+    HeartRate      *MetricStats `json:"heart_rate,omitempty"`
+    Power          *MetricStats `json:"power,omitempty"`
+    Speed          *MetricStats `json:"speed,omitempty"`
+    Cadence        *MetricStats `json:"cadence,omitempty"`
+    Elevation      *MetricStats `json:"elevation,omitempty"`
+    Temperature    *MetricStats `json:"temperature,omitempty"`
+}
+
+type LapTrend struct {
+    Metric      string  `json:"metric"`
+    Direction   string  `json:"direction"` // "increasing", "decreasing", "stable"
+    Magnitude   float64 `json:"magnitude"`
+    Confidence  float64 `json:"confidence"`
+}
+
+type LapSpike struct {
+    Metric      string  `json:"metric"`
+    TimeOffset  int     `json:"time_offset"`
+    Value       float64 `json:"value"`
+    Magnitude   float64 `json:"magnitude"`
+    Duration    int     `json:"duration"`
 }
 
 type FeatureSummary struct {
@@ -284,7 +353,19 @@ var (
         "description": "Types of streams to retrieve",
         "items": {
           "type": "string",
-          "enum": ["time", "distance", "latlng", "altitude", "velocity_smooth", "heartrate", "cadence", "watts", "temp", "moving", "grade_smooth"]
+          "enum": [
+            "time",
+            "distance",
+            "latlng",
+            "altitude",
+            "velocity_smooth",
+            "heartrate",
+            "cadence",
+            "watts",
+            "temp",
+            "moving",
+            "grade_smooth"
+          ]
         },
         "default": ["time", "distance", "heartrate", "watts"]
       },
@@ -321,7 +402,7 @@ var (
     "required": ["activity_id"],
     "if": {
       "properties": {
-        "processing_mode": {"const": "ai-summary"}
+        "processing_mode": { "const": "ai-summary" }
       }
     },
     "then": {
@@ -341,6 +422,7 @@ All stream requests use pagination by default. Processing modes determine how da
 - **ai-summary**: Use AI to summarize the stream data with optional custom prompt (paginated or full)
 
 **Page Size Handling:**
+
 - Positive page_size: Return data in pages of specified size
 - Negative page_size: Attempt to return full dataset, applying processing mode if too large for context
 
@@ -353,19 +435,19 @@ When presenting processing options, include these descriptions:
 
 🔍 **raw** - Get the actual stream data points (time, heart rate, power, etc.)
    Best for: Detailed analysis, specific time intervals, technical examination
-   
+
 📈 **derived** - Get calculated features, statistics, and insights from the data
    Best for: Performance analysis, training insights, pattern identification
-   
+
 🤖 **ai-summary** - Get an AI-generated summary focusing on key findings (requires summary_prompt)
    Best for: Quick overview, coaching insights, narrative understanding
-   
+
 ⚡ **auto** - Let the system choose the best approach based on data size
    Best for: When unsure which mode to use
 
 📏 **Token Usage Estimates:**
 - Page size 500: ~1,200 tokens per page
-- Page size 1000: ~2,400 tokens per page  
+- Page size 1000: ~2,400 tokens per page
 - Page size 2000: ~4,800 tokens per page
 - Full dataset (-1): ~15,000 tokens (may require processing)
 
@@ -422,6 +504,10 @@ type StreamConfig struct {
 8. **Moving Time Analysis**: Analyze moving vs stopped time patterns
 9. **Temperature Patterns**: Identify temperature trends and variations during activity
 10. **Multi-Metric Correlations**: Analyze relationships between different stream types (e.g., power vs heart rate)
+11. **Lap-by-Lap Analysis**: Segment stream data using lap boundaries and calculate per-lap statistics
+12. **Lap Comparison**: Compare performance metrics across laps to identify patterns and consistency
+13. **Lap Progression**: Analyze how metrics change from lap to lap (pacing strategy, fatigue patterns)
+14. **Distance-Based Segmentation**: When lap data unavailable, segment by distance intervals (km/mile)
 
 ### Pagination Strategy
 
@@ -448,6 +534,7 @@ type StreamConfig struct {
 ### Human-Readable Format Examples
 
 #### Activity List Format
+
 ```
 🏃 **Morning Ride** (ID: 15347546137) — 29.17km on 8/5/2025
 🚴 **Evening Run** (ID: 15347546138) — 10.5km on 8/4/2025
@@ -455,6 +542,7 @@ type StreamConfig struct {
 ```
 
 #### Activity Details Format
+
 ```
 🏃 **Morning Ride** (ID: 15347546137)
 - Type: Ride (Cycling)
@@ -471,6 +559,7 @@ type StreamConfig struct {
 ```
 
 #### Stream Data Derived Features Format
+
 ```
 📊 **Stream Analysis for Morning Ride** (ID: 15347546137)
 
@@ -495,10 +584,25 @@ type StreamConfig struct {
 - Average cadence: 83.8 rpm (Range: 45-105 rpm)
 - Moving time: 92.1% of total time
 
+🏁 **Lap-by-Lap Analysis** (4 laps detected)
+
+**Lap Performance Summary:**
+- Lap 1: 7.3km in 21:45 - Avg Speed: 20.1 km/h, Avg HR: 142 bpm, Avg Power: 95W
+- Lap 2: 7.3km in 21:32 - Avg Speed: 20.3 km/h, Avg HR: 145 bpm, Avg Power: 98W
+- Lap 3: 7.3km in 22:01 - Avg Speed: 19.9 km/h, Avg HR: 147 bpm, Avg Power: 102W
+- Lap 4: 7.2km in 21:52 - Avg Speed: 19.8 km/h, Avg HR: 146 bpm, Avg Power: 99W
+
+**Lap Comparisons:**
+- Fastest lap: Lap 2 (21:32)
+- Highest power: Lap 3 (102W avg)
+- Most consistent: Speed variation 1.2% across laps
+- Heart rate progression: +4 bpm from lap 1 to lap 3
+
 **Statistical Summary:**
 - Total data points: 5,230
 - Data quality: Complete (no gaps detected)
 - Stream types: time, distance, heartrate, watts, cadence
+- Segmentation: 4 manual laps detected
 ```
 
 ### Formatting Principles

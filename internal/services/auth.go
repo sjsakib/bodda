@@ -52,7 +52,7 @@ func NewAuthService(cfg *config.Config, userRepo UserRepository) AuthService {
 		ClientID:     cfg.StravaClientID,
 		ClientSecret: cfg.StravaClientSecret,
 		RedirectURL:  cfg.StravaRedirectURL,
-		Scopes:       []string{"read,activity:read_all"},
+		Scopes:       []string{"read,profile:read_all,activity:read_all"},
 		Endpoint: oauth2.Endpoint{
 			AuthURL:  "https://www.strava.com/oauth/authorize",
 			TokenURL: "https://www.strava.com/oauth/token",

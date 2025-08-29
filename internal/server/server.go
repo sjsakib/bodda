@@ -6,12 +6,12 @@ import (
 	"bodda/internal/models"
 	"bodda/internal/services"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
-	"time"
 	"strings"
-	"errors"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,18 +27,25 @@ type Server struct {
 	stravaService  services.StravaService
 	logbookService services.LogbookService
 	repo           *database.Repository
+	toolController *ToolController
 }
 
 func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	// Initialize repositories
 	repo := database.NewRepository(db)
-	
+
 	// Initialize services
 	authService := services.NewAuthService(cfg, repo.User)
 	stravaService := services.NewStravaService(cfg, repo.User)
 	logbookService := services.NewLogbookService(repo.Logbook)
 	chatService := services.NewChatService(repo)
 	aiService := services.NewAIService(cfg, stravaService, logbookService)
+
+	// Initialize tool services
+	toolRegistry := services.NewToolRegistry()
+	toolExecutionService := services.NewToolExecutionAdapter(aiService)
+	toolExecutor := services.NewToolExecutor(toolExecutionService, toolRegistry)
+	toolController := NewToolController(toolRegistry, toolExecutor, cfg)
 
 	s := &Server{
 		config:         cfg,
@@ -50,6 +57,7 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 		stravaService:  stravaService,
 		logbookService: logbookService,
 		repo:           repo,
+		toolController: toolController,
 	}
 
 	s.setupRoutes()
@@ -107,6 +115,18 @@ func (s *Server) setupRoutes() {
 		api.GET("/sessions/:id/messages", s.getMessages)
 		api.POST("/sessions/:id/messages", s.sendMessage)
 		api.GET("/sessions/:id/stream", s.streamResponse)
+	}
+
+	// Tool execution routes (development only)
+	tools := s.router.Group("/api/tools")
+	tools.Use(DevelopmentOnlyMiddleware(s.config))
+	tools.Use(InputValidationMiddleware())
+	tools.Use(WorkspaceBoundaryMiddleware())
+	tools.Use(s.authMiddleware())
+	{
+		tools.GET("", s.toolController.ListTools)
+		tools.GET("/:toolName/schema", s.toolController.GetToolSchema)
+		tools.POST("/execute", s.toolController.ExecuteTool)
 	}
 }
 
@@ -197,12 +217,12 @@ func (s *Server) requestLoggingMiddleware() gin.HandlerFunc {
 func (s *Server) errorRecoveryMiddleware() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
 		log.Printf("Panic recovered: %v", recovered)
-		
+
 		// Check if client disconnected
 		if c.Writer.Written() {
 			return
 		}
-		
+
 		c.JSON(500, gin.H{
 			"error": "Internal server error",
 			"code":  "INTERNAL_ERROR",
@@ -265,7 +285,7 @@ func (s *Server) getSessions(c *gin.Context) {
 	sessions, err := s.chatService.GetSessions(userModel.ID)
 	if err != nil {
 		log.Printf("Error getting sessions for user %s: %v", userModel.ID, err)
-		
+
 		// Handle specific error types
 		if strings.Contains(err.Error(), "connection") {
 			c.JSON(503, gin.H{
@@ -274,7 +294,7 @@ func (s *Server) getSessions(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(500, gin.H{
 			"error": "Failed to retrieve sessions",
 			"code":  "SESSION_RETRIEVAL_ERROR",
@@ -309,10 +329,10 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	userModel := user.(*models.User)
-	
+
 	var session *models.Session
 	var err error
-	
+
 	if req.Title != "" {
 		session, err = s.chatService.CreateSessionWithTitle(userModel.ID, req.Title)
 	} else {
@@ -321,7 +341,7 @@ func (s *Server) createSession(c *gin.Context) {
 
 	if err != nil {
 		log.Printf("Error creating session for user %s: %v", userModel.ID, err)
-		
+
 		// Handle specific error types
 		if errors.Is(err, services.ErrInvalidSessionTitle) {
 			c.JSON(400, gin.H{
@@ -330,7 +350,7 @@ func (s *Server) createSession(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		if strings.Contains(err.Error(), "connection") {
 			c.JSON(503, gin.H{
 				"error": "Database temporarily unavailable",
@@ -338,7 +358,7 @@ func (s *Server) createSession(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(500, gin.H{
 			"error": "Failed to create session",
 			"code":  "SESSION_CREATION_ERROR",
@@ -435,7 +455,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Validate message content
 	if strings.TrimSpace(req.Content) == "" {
 		c.JSON(400, gin.H{
@@ -464,7 +484,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 	userMessage, err := s.chatService.SendMessage(sessionID, "user", req.Content)
 	if err != nil {
 		log.Printf("Error saving user message: %v", err)
-		
+
 		// Handle specific error types
 		if errors.Is(err, services.ErrMessageTooLong) {
 			c.JSON(400, gin.H{
@@ -473,7 +493,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		if errors.Is(err, services.ErrInvalidMessageContent) {
 			c.JSON(400, gin.H{
 				"error": "Invalid message content",
@@ -481,7 +501,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		if errors.Is(err, services.ErrSessionNotFound) {
 			c.JSON(404, gin.H{
 				"error": "Session not found",
@@ -489,7 +509,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(500, gin.H{
 			"error": "Failed to save message",
 			"code":  "MESSAGE_SAVE_ERROR",
@@ -507,7 +527,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 
 	// Process message with AI
 	ctx := context.Background()
-	
+
 	// Get athlete logbook for AI context
 	logbook, err := s.logbookService.GetLogbook(ctx, userModel.ID)
 	if err != nil {
@@ -528,7 +548,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 	aiResponse, err := s.aiService.ProcessMessageSync(ctx, msgCtx)
 	if err != nil {
 		log.Printf("Error processing AI message: %v", err)
-		
+
 		// Handle specific AI error types
 		if errors.Is(err, services.ErrOpenAIUnavailable) {
 			c.JSON(503, gin.H{
@@ -537,7 +557,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		if errors.Is(err, services.ErrOpenAIRateLimit) {
 			c.JSON(429, gin.H{
 				"error": "AI service rate limit exceeded",
@@ -545,7 +565,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		if errors.Is(err, services.ErrContextTooLong) {
 			c.JSON(400, gin.H{
 				"error": "Conversation is too long",
@@ -553,7 +573,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 			})
 			return
 		}
-		
+
 		c.JSON(500, gin.H{
 			"error": "Failed to process message",
 			"code":  "AI_PROCESSING_ERROR",
@@ -650,7 +670,7 @@ func (s *Server) streamResponse(c *gin.Context) {
 
 	// Process message with AI streaming
 	ctx := context.Background()
-	
+
 	// Get athlete logbook for AI context
 	logbook, err := s.logbookService.GetLogbook(ctx, userModel.ID)
 	if err != nil {

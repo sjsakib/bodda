@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Loading Fix</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .test-case { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+        .loading { background: #f0f8ff; border-color: #87ceeb; }
+        .error { background: #ffe4e1; border-color: #ff6b6b; }
+        .success { background: #f0fff0; border-color: #90ee90; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Vega-Lite Loading Fix Test</h1>
+        
+        <div class="test-case">
+            <h3>Test: Component Loading Behavior</h3>
+            <div id="test-result">
+                <div class="loading">
+                    <p><strong>Status:</strong> Testing component loading...</p>
+                    <p><strong>Expected:</strong> Should either load successfully or show error within 5 seconds</p>
+                    <p><strong>Issue:</strong> Previously got stuck on "Loading chart component..."</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="test-case">
+            <h3>Library Import Test</h3>
+            <div id="import-test">Testing imports...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        const { useState, useEffect } = React;
+
+        // Simulate the component loading behavior
+        function TestComponent() {
+            const [status, setStatus] = useState('loading');
+            const [message, setMessage] = useState('Loading chart component...');
+            const [VegaLiteComponent, setVegaLiteComponent] = useState(null);
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                // Simulate the library context being ready
+                setTimeout(() => {
+                    // Simulate component loading with timeout
+                    const loadTimer = setTimeout(() => {
+                        import('https://unpkg.com/react-vega@7/dist/index.js')
+                            .then((module) => {
+                                setVegaLiteComponent(module.VegaLite || module.default?.VegaLite);
+                                setStatus('success');
+                                setMessage('Component loaded successfully!');
+                            })
+                            .catch(err => {
+                                setError('Failed to load component: ' + err.message);
+                                setStatus('error');
+                                setMessage('Component loading failed');
+                            });
+                    }, 100);
+
+                    // Timeout after 5 seconds
+                    const timeoutTimer = setTimeout(() => {
+                        if (!VegaLiteComponent && status === 'loading') {
+                            setError('Timeout loading chart component');
+                            setStatus('error');
+                            setMessage('Loading timed out after 5 seconds');
+                        }
+                    }, 5000);
+
+                    return () => {
+                        clearTimeout(loadTimer);
+                        clearTimeout(timeoutTimer);
+                    };
+                }, 1000); // Simulate 1 second library loading
+            }, [VegaLiteComponent, status]);
+
+            const getStatusClass = () => {
+                switch (status) {
+                    case 'loading': return 'loading';
+                    case 'error': return 'error';
+                    case 'success': return 'success';
+                    default: return '';
+                }
+            };
+
+            return React.createElement('div', { className: getStatusClass() }, [
+                React.createElement('p', { key: 'status' }, [
+                    React.createElement('strong', null, 'Status: '),
+                    message
+                ]),
+                error && React.createElement('p', { key: 'error' }, [
+                    React.createElement('strong', null, 'Error: '),
+                    error
+                ]),
+                React.createElement('p', { key: 'component' }, [
+                    React.createElement('strong', null, 'Component: '),
+                    VegaLiteComponent ? 'Loaded' : 'Not loaded'
+                ])
+            ]);
+        }
+
+        // Test direct imports
+        async function testImports() {
+            const resultDiv = document.getElementById('import-test');
+            
+            try {
+                resultDiv.innerHTML = '<div class="loading">Testing vega import...</div>';
+                await import('https://unpkg.com/vega@5/build/vega.min.js');
+                
+                resultDiv.innerHTML = '<div class="loading">Testing vega-lite import...</div>';
+                await import('https://unpkg.com/vega-lite@5/build/vega-lite.min.js');
+                
+                resultDiv.innerHTML = '<div class="success">✓ All imports successful</div>';
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">✗ Import failed: ${error.message}</div>`;
+            }
+        }
+
+        // Render the test component
+        ReactDOM.render(
+            React.createElement(TestComponent),
+            document.getElementById('test-result')
+        );
+
+        // Test imports
+        testImports();
+    </script>
+</body>
+</html>

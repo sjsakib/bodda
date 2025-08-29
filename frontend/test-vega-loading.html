@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Vega-Lite Loading</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/vega@5"></script>
+    <script src="https://unpkg.com/vega-lite@5"></script>
+    <script src="https://unpkg.com/react-vega@7"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-container { margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>Vega-Lite Component Loading Test</h1>
+    
+    <div class="test-container">
+        <h2>Test 1: Valid Chart</h2>
+        <div id="test1"></div>
+    </div>
+    
+    <div class="test-container">
+        <h2>Test 2: Invalid Chart (should show error)</h2>
+        <div id="test2"></div>
+    </div>
+
+    <script>
+        const { useState, useEffect } = React;
+        const { VegaLite } = ReactVega;
+
+        function TestChart({ spec, title }) {
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [parsedSpec, setParsedSpec] = useState(null);
+
+            useEffect(() => {
+                try {
+                    const parsed = JSON.parse(spec);
+                    setParsedSpec(parsed);
+                    setError(null);
+                } catch (err) {
+                    setError(err.message);
+                }
+                setLoading(false);
+            }, [spec]);
+
+            if (loading) {
+                return React.createElement('div', { style: { padding: '20px', textAlign: 'center' } }, 
+                    'Loading chart component...'
+                );
+            }
+
+            if (error) {
+                return React.createElement('div', { 
+                    style: { padding: '20px', backgroundColor: '#fee', border: '1px solid #fcc', borderRadius: '4px' } 
+                }, 
+                    React.createElement('strong', null, 'Error: '),
+                    error
+                );
+            }
+
+            if (parsedSpec) {
+                return React.createElement(VegaLite, {
+                    spec: parsedSpec,
+                    actions: false
+                });
+            }
+
+            return React.createElement('div', null, 'No chart to display');
+        }
+
+        // Valid chart spec
+        const validSpec = JSON.stringify({
+            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+            "mark": "bar",
+            "data": {
+                "values": [
+                    {"category": "A", "value": 28},
+                    {"category": "B", "value": 55},
+                    {"category": "C", "value": 43}
+                ]
+            },
+            "encoding": {
+                "x": {"field": "category", "type": "nominal"},
+                "y": {"field": "value", "type": "quantitative"}
+            }
+        });
+
+        // Invalid chart spec
+        const invalidSpec = '{"mark": "bar", "invalid": }';
+
+        // Render test components
+        ReactDOM.render(
+            React.createElement(TestChart, { spec: validSpec, title: "Valid Chart" }),
+            document.getElementById('test1')
+        );
+
+        ReactDOM.render(
+            React.createElement(TestChart, { spec: invalidSpec, title: "Invalid Chart" }),
+            document.getElementById('test2')
+        );
+    </script>
+</body>
+</html>

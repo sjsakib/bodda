@@ -68,14 +68,20 @@ describe('API Integration Tests', () => {
     it('should redirect to Strava OAuth', () => {
       const originalLocation = window.location
       delete (window as any).location
-      window.location = { ...originalLocation, href: '' }
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true
+      })
 
       apiClient.redirectToStravaAuth()
       
       expect(window.location.href).toBe('/auth/strava')
       
       // Restore
-      window.location = originalLocation
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true
+      })
     })
   })
 

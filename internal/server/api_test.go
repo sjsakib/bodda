@@ -116,6 +116,32 @@ func (m *MockAIService) ProcessMessageSync(ctx context.Context, msgCtx *services
 	return args.String(0), args.Error(1)
 }
 
+// Tool execution methods for the tool execution endpoint
+func (m *MockAIService) ExecuteGetAthleteProfile(ctx context.Context, msgCtx *services.MessageContext) (string, error) {
+	args := m.Called(ctx, msgCtx)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockAIService) ExecuteGetRecentActivities(ctx context.Context, msgCtx *services.MessageContext, perPage int) (string, error) {
+	args := m.Called(ctx, msgCtx, perPage)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockAIService) ExecuteGetActivityDetails(ctx context.Context, msgCtx *services.MessageContext, activityID int64) (string, error) {
+	args := m.Called(ctx, msgCtx, activityID)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockAIService) ExecuteGetActivityStreams(ctx context.Context, msgCtx *services.MessageContext, activityID int64, streamTypes []string, resolution string, processingMode string, pageNumber int, pageSize int, summaryPrompt string) (string, error) {
+	args := m.Called(ctx, msgCtx, activityID, streamTypes, resolution, processingMode, pageNumber, pageSize, summaryPrompt)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockAIService) ExecuteUpdateAthleteLogbook(ctx context.Context, msgCtx *services.MessageContext, content string) (string, error) {
+	args := m.Called(ctx, msgCtx, content)
+	return args.String(0), args.Error(1)
+}
+
 type MockLogbookService struct {
 	mock.Mock
 }

@@ -2,8 +2,6 @@ package monitoring
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"

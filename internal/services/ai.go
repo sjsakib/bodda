@@ -58,71 +58,6 @@ func NewIterativeProcessor(msgCtx *MessageContext, progressCallback func(string)
 	}
 }
 
-// ProgressUpdate represents a coaching-focused progress message
-type ProgressUpdate struct {
-	Message string `json:"message"`
-	Round   int    `json:"round"`
-}
-
-// GetProgressMessage returns a coaching-focused progress message for the current round
-func (ip *IterativeProcessor) GetProgressMessage() string {
-	roundMessages := [][]string{
-		// Round 0 - Initial exploration
-		{
-			"Let me start by understanding your training background...",
-			"Getting familiar with your athletic profile...",
-			"Beginning to review your training data...",
-		},
-		// Round 1 - Activity review
-		{
-			"Now looking at your recent training activities...",
-			"Reviewing what you've been working on lately...",
-			"Checking out your recent workout history...",
-		},
-		// Round 2 - Pattern analysis
-		{
-			"Analyzing patterns in your training approach...",
-			"Looking for trends in your workout data...",
-			"Examining how your training has been progressing...",
-		},
-		// Round 3 - Detailed insights
-		{
-			"Diving deeper into your performance metrics...",
-			"Gathering detailed insights about your training...",
-			"Analyzing the specifics of your workout data...",
-		},
-		// Round 4+ - Final synthesis
-		{
-			"Putting together my comprehensive analysis...",
-			"Finalizing my review of your training data...",
-			"Preparing personalized recommendations for you...",
-		},
-	}
-
-	roundIndex := ip.CurrentRound
-	if roundIndex >= len(roundMessages) {
-		roundIndex = len(roundMessages) - 1
-	}
-
-	// Use current time for simple randomization
-	messages := roundMessages[roundIndex]
-	index := int(time.Now().UnixNano()) % len(messages)
-	return messages[index]
-}
-
-// ShouldContinue determines if another round of analysis should be performed
-func (ip *IterativeProcessor) ShouldContinue(hasToolCalls bool) bool {
-	if !hasToolCalls {
-		return false
-	}
-
-	if ip.CurrentRound >= ip.MaxRounds {
-		return false
-	}
-
-	return true
-}
-
 // AddToolResults adds tool results for the current round and increments the round counter
 func (ip *IterativeProcessor) AddToolResults(results []ToolResult) {
 	ip.ToolResults = append(ip.ToolResults, results)
@@ -151,24 +86,69 @@ var (
 type AIService interface {
 	ProcessMessage(ctx context.Context, msgCtx *MessageContext) (<-chan string, error)
 	ProcessMessageSync(ctx context.Context, msgCtx *MessageContext) (string, error)
+	
+	// Tool execution methods for the tool execution endpoint
+	ExecuteGetAthleteProfile(ctx context.Context, msgCtx *MessageContext) (string, error)
+	ExecuteGetRecentActivities(ctx context.Context, msgCtx *MessageContext, perPage int) (string, error)
+	ExecuteGetActivityDetails(ctx context.Context, msgCtx *MessageContext, activityID int64) (string, error)
+	ExecuteGetActivityStreams(ctx context.Context, msgCtx *MessageContext, activityID int64, streamTypes []string, resolution string, processingMode string, pageNumber int, pageSize int, summaryPrompt string) (string, error)
+	ExecuteUpdateAthleteLogbook(ctx context.Context, msgCtx *MessageContext, content string) (string, error)
 }
 
 type aiService struct {
-	client         *openai.Client
-	stravaService  StravaService
-	logbookService LogbookService
-	config         *config.Config
+	client               *openai.Client
+	stravaService        StravaService
+	logbookService       LogbookService
+	formatter            OutputFormatter
+	config               *config.Config
+	streamProcessor      StreamProcessor
+	summaryProcessor     SummaryProcessor
+	processingDispatcher ProcessingModeDispatcher
+	unifiedProcessor     *UnifiedStreamProcessor
+	contextManager       ContextManager
 }
 
 // NewAIService creates a new AI service instance
 func NewAIService(cfg *config.Config, stravaService StravaService, logbookService LogbookService) AIService {
 	client := openai.NewClient(cfg.OpenAIAPIKey)
 
+	// Create stream processing components
+	streamProcessor := NewStreamProcessor(cfg)
+	summaryProcessor := NewSummaryProcessor(client)
+	processingDispatcher := NewProcessingModeDispatcher(streamProcessor, summaryProcessor)
+
+	// Create derived features processor and unified stream processor
+	derivedProcessor := NewDerivedFeaturesProcessor()
+	outputFormatter := NewOutputFormatter()
+	unifiedProcessor := NewUnifiedStreamProcessor(
+		&StreamConfig{
+			MaxContextTokens:  cfg.StreamProcessing.MaxContextTokens,
+			TokenPerCharRatio: cfg.StreamProcessing.TokenPerCharRatio,
+			DefaultPageSize:   cfg.StreamProcessing.DefaultPageSize,
+			MaxPageSize:       cfg.StreamProcessing.MaxPageSize,
+			RedactionEnabled:  cfg.StreamProcessing.RedactionEnabled,
+			StravaResolutions: []string{"low", "medium", "high"},
+		},
+		stravaService,
+		derivedProcessor,
+		summaryProcessor,
+		outputFormatter,
+	)
+
+	// Create context manager for stream output redaction
+	contextManager := NewContextManager(cfg.StreamProcessing.RedactionEnabled)
+
 	return &aiService{
-		client:         client,
-		stravaService:  stravaService,
-		logbookService: logbookService,
-		config:         cfg,
+		client:               client,
+		stravaService:        stravaService,
+		logbookService:       logbookService,
+		formatter:            outputFormatter,
+		config:               cfg,
+		streamProcessor:      streamProcessor,
+		summaryProcessor:     summaryProcessor,
+		processingDispatcher: processingDispatcher,
+		unifiedProcessor:     unifiedProcessor,
+		contextManager:       contextManager,
 	}
 }
 
@@ -221,142 +201,45 @@ func (s *aiService) ProcessMessageSync(ctx context.Context, msgCtx *MessageConte
 		return "", err
 	}
 
-	messages := s.prepareMessages(msgCtx)
-	tools := s.getAvailableTools()
+	// Use the same iterative processor logic as streaming, but collect all output
+	var responseBuilder strings.Builder
+	responseChan := make(chan string, 100)
 
-	req := openai.ChatCompletionRequest{
-		Model:    MODEL,
-		Messages: messages,
-		Tools:    tools,
-		// Temperature: 0.7,
-		// MaxTokens:   2000,
-	}
+	// Create iterative processor with response collection
+	processor := NewIterativeProcessor(msgCtx, func(message string) {
+		responseChan <- message
+	})
 
-	resp, err := s.client.CreateChatCompletion(ctx, req)
-	if err != nil {
-		aiErr := s.handleOpenAIError(err)
-		if errors.Is(aiErr, ErrOpenAIUnavailable) {
-			return s.getFallbackResponse("I'm experiencing technical difficulties right now. Please try again in a moment."), nil
-		}
-		return "", aiErr
-	}
-
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no response choices returned")
-	}
-
-	choice := resp.Choices[0]
-
-	// Handle tool calls
-	if len(choice.Message.ToolCalls) > 0 {
-		toolResults, err := s.executeTools(ctx, msgCtx, choice.Message.ToolCalls)
-		if err != nil {
-			return "", fmt.Errorf("failed to execute tools: %w", err)
-		}
-
-		// Create follow-up request with tool results
-		followUpMessages := append(messages, choice.Message)
-
-		// Add tool results as messages
-		for _, result := range toolResults {
-			followUpMessages = append(followUpMessages, openai.ChatCompletionMessage{
-				Role:       openai.ChatMessageRoleTool,
-				Content:    result.Content,
-				ToolCallID: result.ToolCallID,
-			})
-		}
-
-		// Make follow-up request
-		followUpReq := openai.ChatCompletionRequest{
-			Model:    MODEL,
-			Messages: followUpMessages,
-			// Temperature: 0.7,
-			// MaxTokens:   2000,
-		}
-
-		followUpResp, err := s.client.CreateChatCompletion(ctx, followUpReq)
+	// Process in a goroutine and collect all responses
+	go func() {
+		defer close(responseChan)
+		err := s.processIterativeToolCalls(ctx, processor, responseChan)
 		if err != nil {
 			aiErr := s.handleOpenAIError(err)
 			if errors.Is(aiErr, ErrOpenAIUnavailable) {
-				return s.getFallbackResponse("I processed your request but encountered an issue generating the final response. Please try again."), nil
+				message := s.getRandomMessage([]string{
+					"I'm experiencing technical difficulties right now. Please try again in a moment.",
+					"I'm having some connectivity issues at the moment. Please try reaching out again in a few minutes.",
+					"There's a hiccup on my end right now. Please try your question again shortly.",
+				})
+				responseChan <- message
+			} else {
+				message := s.getRandomMessage([]string{
+					"I ran into an issue while analyzing your training data. Please try your question again.",
+					"Something went wrong while I was processing your request. Please give it another try.",
+					"I encountered a problem while working on your question. Please try asking again.",
+				})
+				responseChan <- message
 			}
-			return "", fmt.Errorf("failed to create follow-up completion: %w", aiErr)
 		}
+	}()
 
-		if len(followUpResp.Choices) == 0 {
-			return "", fmt.Errorf("no follow-up response choices returned")
-		}
-
-		return followUpResp.Choices[0].Message.Content, nil
+	// Collect all responses
+	for chunk := range responseChan {
+		responseBuilder.WriteString(chunk)
 	}
 
-	return choice.Message.Content, nil
-}
-
-// prepareMessages converts the conversation history and current message into OpenAI format
-func (s *aiService) prepareMessages(msgCtx *MessageContext) []openai.ChatCompletionMessage {
-	messages := []openai.ChatCompletionMessage{
-		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: s.buildSystemPrompt(msgCtx),
-		},
-	}
-
-	// Add conversation history
-	for _, msg := range msgCtx.ConversationHistory {
-		role := openai.ChatMessageRoleUser
-		if msg.Role == "assistant" {
-			role = openai.ChatMessageRoleAssistant
-		}
-
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    role,
-			Content: msg.Content,
-		})
-	}
-
-	// Add current message
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: msgCtx.Message,
-	})
-
-	return messages
-}
-
-// buildSystemPrompt creates the system prompt with athlete logbook context
-func (s *aiService) buildSystemPrompt(msgCtx *MessageContext) string {
-	basePrompt := `You are Bodda, an AI-powered running and cycling coach. You provide personalized coaching advice based on the athlete's Strava data and logbook information.
-
-Your capabilities include:
-- Analyzing Strava activity data (profile, recent activities, detailed activity information, and activity streams)
-- Maintaining and updating athlete logbooks with training insights
-- Providing personalized coaching recommendations
-- Helping with training plans, performance analysis, and goal setting
-
-Guidelines:
-- Always be encouraging and supportive
-- Base your advice on data when available
-- Ask clarifying questions when you need more information
-- Update the athlete logbook when you learn new information about the athlete
-- Be specific in your recommendations and explain your reasoning
-- Consider the athlete's goals, experience level, and current fitness when giving advice
-
-Available tools:
-- get-athlete-profile: Get complete Strava athlete profile
-- get-recent-activities: Get recent activities (configurable count)
-- get-activity-details: Get detailed information about a specific activity
-- get-activity-streams: Get time-series data from an activity (heart rate, power, etc.)
-- update-athlete-logbook: Update the athlete's logbook with new information`
-
-	// Add athlete logbook context if available
-	if msgCtx.AthleteLogbook != nil && msgCtx.AthleteLogbook.Content != "" {
-		basePrompt += fmt.Sprintf("\n\nCurrent Athlete Logbook:\n%s", msgCtx.AthleteLogbook.Content)
-	} else {
-		basePrompt += "\n\nNo athlete logbook exists yet. You should create one using the update-athlete-logbook tool when you learn about the athlete."
-	}
-
-	return basePrompt
+	return responseBuilder.String(), nil
 }
 
 // getAvailableTools returns the OpenAI function definitions for available tools
@@ -414,7 +297,7 @@ func (s *aiService) getAvailableTools() []openai.Tool {
 			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
 				Name:        "get-activity-streams",
-				Description: "Get time-series data streams from a Strava activity (heart rate, power, cadence, etc.)",
+				Description: "Get time-series data streams from a Strava activity with processing options for large datasets",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -436,9 +319,32 @@ func (s *aiService) getAvailableTools() []openai.Tool {
 						},
 						"resolution": map[string]interface{}{
 							"type":        "string",
-							"description": "Resolution of the data (low, medium, high)",
+							"description": "Resolution of the data",
 							"enum":        []string{"low", "medium", "high"},
 							"default":     "medium",
+						},
+						"processing_mode": map[string]interface{}{
+							"type":        "string",
+							"description": "How to process large datasets that exceed context limits",
+							"enum":        []string{"auto", "raw", "derived", "ai-summary"},
+							"default":     "auto",
+						},
+						"page_number": map[string]interface{}{
+							"type":        "integer",
+							"description": "Page number for paginated processing (1-based)",
+							"minimum":     1,
+							"default":     1,
+						},
+						"page_size": map[string]interface{}{
+							"type":        "integer",
+							"description": "Number of data points per page. Use negative value to request full dataset (subject to context limits)",
+							"minimum":     -1,
+							"maximum":     5000,
+							"default":     1000,
+						},
+						"summary_prompt": map[string]interface{}{
+							"type":        "string",
+							"description": "Custom prompt for AI summarization mode (required when processing_mode is 'ai-summary')",
 						},
 					},
 					"required": []string{"activity_id"},
@@ -472,10 +378,13 @@ func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *It
 	tools := s.getAvailableTools()
 
 	for {
+		// Apply context redaction before creating the request
+		redactedMessages := s.contextManager.RedactPreviousStreamOutputs(processor.Messages)
+
 		// Create chat completion request with enhanced context
 		req := openai.ChatCompletionRequest{
 			Model:    MODEL,
-			Messages: processor.Messages,
+			Messages: redactedMessages,
 			Tools:    tools,
 			Stream:   true,
 			// Temperature: 0.7,
@@ -649,90 +558,6 @@ func (s *aiService) shouldContinueAnalysis(processor *IterativeProcessor, toolCa
 
 	// for now we will continue as long as there is tool calls and max round not reached
 	return true, "continue_analysis"
-
-	// Analyze the nature of tool calls to determine if more analysis is beneficial
-	// analysisDepth := s.assessAnalysisDepth(processor, toolCalls)
-
-	// Continue if we're still in exploratory phase and haven't reached sufficient depth
-	// if analysisDepth < 3 && processor.CurrentRound < processor.MaxRounds-1 {
-	// 	return true, "continue_analysis"
-	// }
-
-	// Continue if tool calls suggest deeper analysis is needed
-	// if s.toolCallsSuggestDeeperAnalysis(toolCalls) && processor.CurrentRound < processor.MaxRounds-1 {
-	// 	return true, "deeper_analysis"
-	// }
-
-	// return false, "sufficient_data"
-}
-
-// assessAnalysisDepth evaluates how deep the current analysis has gone
-func (s *aiService) assessAnalysisDepth(processor *IterativeProcessor, toolCalls []openai.ToolCall) int {
-	depth := 0
-
-	// Count different types of analysis performed
-	hasProfile := false
-	hasActivities := false
-	hasDetails := false
-	hasStreams := false
-
-	// Check current round
-	for _, call := range toolCalls {
-		switch call.Function.Name {
-		case "get-athlete-profile":
-			hasProfile = true
-		case "get-recent-activities":
-			hasActivities = true
-		case "get-activity-details":
-			hasDetails = true
-		case "get-activity-streams":
-			hasStreams = true
-		}
-	}
-
-	// Check previous rounds
-	for _, roundResults := range processor.ToolResults {
-		for _, result := range roundResults {
-			if result.Error == "" {
-				switch {
-				case strings.Contains(result.Content, "firstname") || strings.Contains(result.Content, "ftp"):
-					hasProfile = true
-				case strings.Contains(result.Content, "activities") && strings.Contains(result.Content, "distance"):
-					hasActivities = true
-				case strings.Contains(result.Content, "description") || strings.Contains(result.Content, "calories"):
-					hasDetails = true
-				case strings.Contains(result.Content, "heartrate") || strings.Contains(result.Content, "watts"):
-					hasStreams = true
-				}
-			}
-		}
-	}
-
-	if hasProfile {
-		depth++
-	}
-	if hasActivities {
-		depth++
-	}
-	if hasDetails {
-		depth++
-	}
-	if hasStreams {
-		depth++
-	}
-
-	return depth
-}
-
-// toolCallsSuggestDeeperAnalysis checks if current tool calls indicate need for deeper analysis
-func (s *aiService) toolCallsSuggestDeeperAnalysis(toolCalls []openai.ToolCall) bool {
-	for _, call := range toolCalls {
-		// If we're getting activity details or streams, we're doing deep analysis
-		if call.Function.Name == "get-activity-details" || call.Function.Name == "get-activity-streams" {
-			return true
-		}
-	}
-	return false
 }
 
 // getCoachingProgressMessage returns natural coaching-focused progress messages
@@ -1054,14 +879,12 @@ func (s *aiService) executeTools(ctx context.Context, msgCtx *MessageContext, to
 
 		switch toolCall.Function.Name {
 		case "get-athlete-profile":
-			data, err := s.executeGetAthleteProfile(ctx, msgCtx)
+			content, err := s.executeGetAthleteProfile(ctx, msgCtx)
 			if err != nil {
 				result.Error = err.Error()
 				result.Content = fmt.Sprintf("Error getting athlete profile: %v", err)
 			} else {
-				result.Data = data
-				jsonData, _ := json.Marshal(data)
-				result.Content = string(jsonData)
+				result.Content = content
 			}
 
 		case "get-recent-activities":
@@ -1075,14 +898,12 @@ func (s *aiService) executeTools(ctx context.Context, msgCtx *MessageContext, to
 				if args.PerPage == 0 {
 					args.PerPage = 30
 				}
-				data, err := s.executeGetRecentActivities(ctx, msgCtx, args.PerPage)
+				content, err := s.executeGetRecentActivities(ctx, msgCtx, args.PerPage)
 				if err != nil {
 					result.Error = err.Error()
 					result.Content = fmt.Sprintf("Error getting recent activities: %v", err)
 				} else {
-					result.Data = data
-					jsonData, _ := json.Marshal(data)
-					result.Content = string(jsonData)
+					result.Content = content
 				}
 			}
 
@@ -1094,41 +915,59 @@ func (s *aiService) executeTools(ctx context.Context, msgCtx *MessageContext, to
 				result.Error = err.Error()
 				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
 			} else {
-				data, err := s.executeGetActivityDetails(ctx, msgCtx, args.ActivityID)
+				content, err := s.executeGetActivityDetails(ctx, msgCtx, args.ActivityID)
 				if err != nil {
 					result.Error = err.Error()
 					result.Content = fmt.Sprintf("Error getting activity details: %v", err)
 				} else {
-					result.Data = data
-					jsonData, _ := json.Marshal(data)
-					result.Content = string(jsonData)
+					result.Content = content
 				}
 			}
 
 		case "get-activity-streams":
 			var args struct {
-				ActivityID  int64    `json:"activity_id"`
-				StreamTypes []string `json:"stream_types"`
-				Resolution  string   `json:"resolution"`
+				ActivityID     int64    `json:"activity_id"`
+				StreamTypes    []string `json:"stream_types"`
+				Resolution     string   `json:"resolution"`
+				ProcessingMode string   `json:"processing_mode"`
+				PageNumber     int      `json:"page_number"`
+				PageSize       int      `json:"page_size"`
+				SummaryPrompt  string   `json:"summary_prompt"`
 			}
 			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 				result.Error = err.Error()
 				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
 			} else {
+				// Set defaults
 				if len(args.StreamTypes) == 0 {
 					args.StreamTypes = []string{"time", "distance", "heartrate", "watts"}
 				}
 				if args.Resolution == "" {
 					args.Resolution = "medium"
 				}
-				data, err := s.executeGetActivityStreams(ctx, msgCtx, args.ActivityID, args.StreamTypes, args.Resolution)
-				if err != nil {
-					result.Error = err.Error()
-					result.Content = fmt.Sprintf("Error getting activity streams: %v", err)
+				if args.ProcessingMode == "" {
+					args.ProcessingMode = "auto"
+				}
+				if args.PageNumber == 0 {
+					args.PageNumber = 1
+				}
+				if args.PageSize == 0 {
+					args.PageSize = 1000
+				}
+
+				// Validate ai-summary mode requires summary_prompt
+				if args.ProcessingMode == "ai-summary" && args.SummaryPrompt == "" {
+					result.Error = "summary_prompt is required when processing_mode is 'ai-summary'"
+					result.Content = "Error: summary_prompt parameter is required when using ai-summary processing mode"
 				} else {
-					result.Data = data
-					jsonData, _ := json.Marshal(data)
-					result.Content = string(jsonData)
+					processedResult, err := s.executeGetActivityStreamsWithProcessing(ctx, msgCtx, args.ActivityID, args.StreamTypes, args.Resolution, args.ProcessingMode, args.PageNumber, args.PageSize, args.SummaryPrompt)
+					if err != nil {
+						result.Error = err.Error()
+						result.Content = fmt.Sprintf("Error getting activity streams: %v", err)
+					} else {
+						result.Data = processedResult.Data
+						result.Content = processedResult.Content
+					}
 				}
 			}
 
@@ -1163,22 +1002,24 @@ func (s *aiService) executeTools(ctx context.Context, msgCtx *MessageContext, to
 
 // Tool execution methods
 
-func (s *aiService) executeGetAthleteProfile(ctx context.Context, msgCtx *MessageContext) (*StravaAthlete, error) {
+func (s *aiService) executeGetAthleteProfile(ctx context.Context, msgCtx *MessageContext) (string, error) {
 	if msgCtx.User == nil {
-		return nil, fmt.Errorf("user context is required")
+		return "", fmt.Errorf("user context is required")
 	}
 
 	profile, err := s.stravaService.GetAthleteProfile(msgCtx.User)
 	if err != nil {
-		return nil, s.handleStravaError(err, "athlete profile")
+		return "", s.handleStravaError(err, "athlete profile")
 	}
 
-	return profile, nil
+	fmt.Println(profile)
+
+	return s.formatter.FormatAthleteProfile(profile), nil
 }
 
-func (s *aiService) executeGetRecentActivities(ctx context.Context, msgCtx *MessageContext, perPage int) ([]*StravaActivity, error) {
+func (s *aiService) executeGetRecentActivities(ctx context.Context, msgCtx *MessageContext, perPage int) (string, error) {
 	if msgCtx.User == nil {
-		return nil, fmt.Errorf("user context is required")
+		return "", fmt.Errorf("user context is required")
 	}
 
 	params := ActivityParams{
@@ -1187,23 +1028,23 @@ func (s *aiService) executeGetRecentActivities(ctx context.Context, msgCtx *Mess
 
 	activities, err := s.stravaService.GetActivities(msgCtx.User, params)
 	if err != nil {
-		return nil, s.handleStravaError(err, "recent activities")
+		return "", s.handleStravaError(err, "recent activities")
 	}
 
-	return activities, nil
+	return s.formatter.FormatActivities(activities), nil
 }
 
-func (s *aiService) executeGetActivityDetails(ctx context.Context, msgCtx *MessageContext, activityID int64) (*StravaActivityDetail, error) {
+func (s *aiService) executeGetActivityDetails(ctx context.Context, msgCtx *MessageContext, activityID int64) (string, error) {
 	if msgCtx.User == nil {
-		return nil, fmt.Errorf("user context is required")
+		return "", fmt.Errorf("user context is required")
 	}
 
 	details, err := s.stravaService.GetActivityDetail(msgCtx.User, activityID)
 	if err != nil {
-		return nil, s.handleStravaError(err, "activity details")
+		return "", s.handleStravaError(err, "activity details")
 	}
 
-	return details, nil
+	return s.formatter.FormatActivityDetails(details), nil
 }
 
 func (s *aiService) executeGetActivityStreams(ctx context.Context, msgCtx *MessageContext, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
@@ -1217,6 +1058,79 @@ func (s *aiService) executeGetActivityStreams(ctx context.Context, msgCtx *Messa
 	}
 
 	return streams, nil
+}
+
+func (s *aiService) executeGetActivityStreamsWithProcessing(ctx context.Context, msgCtx *MessageContext, activityID int64, streamTypes []string, resolution string, processingMode string, pageNumber int, pageSize int, summaryPrompt string) (*ProcessedStreamResult, error) {
+	if msgCtx.User == nil {
+		return nil, fmt.Errorf("user context is required")
+	}
+
+	// Handle auto mode - check if data needs processing first
+	if processingMode == "auto" {
+		// Get a sample of the data to determine if processing is needed
+		streams, err := s.stravaService.GetActivityStreams(msgCtx.User, activityID, streamTypes, "low")
+		if err != nil {
+			return nil, s.handleStravaError(err, "activity streams")
+		}
+
+		// Use stream processor to determine if processing is needed
+		if !s.streamProcessor.ShouldProcess(streams) {
+			// Data is small enough, get full resolution and return raw formatted data
+			fullStreams, err := s.stravaService.GetActivityStreams(msgCtx.User, activityID, streamTypes, resolution)
+			if err != nil {
+				return nil, s.handleStravaError(err, "activity streams")
+			}
+
+			content := s.formatter.FormatStreamData(fullStreams, "raw")
+			return &ProcessedStreamResult{
+				ToolCallID:     fmt.Sprintf("streams_%d", activityID),
+				Content:        content,
+				ProcessingMode: "raw",
+			}, nil
+		}
+
+		// Data is too large, return processing options with current context information
+		currentContextTokens := s.estimateCurrentContextTokens(msgCtx)
+		result, err := s.streamProcessor.ProcessStreamOutputWithContext(streams, fmt.Sprintf("streams_%d", activityID), currentContextTokens)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process stream output: %w", err)
+		}
+		return result, nil
+	}
+
+	// For specific processing modes, use the unified stream processor
+	req := &PaginatedStreamRequest{
+		ActivityID:     activityID,
+		StreamTypes:    streamTypes,
+		Resolution:     resolution,
+		ProcessingMode: processingMode,
+		PageNumber:     pageNumber,
+		PageSize:       pageSize,
+		SummaryPrompt:  summaryPrompt,
+	}
+
+	// Estimate current context tokens (simplified estimation)
+	currentContextTokens := s.estimateCurrentContextTokens(msgCtx)
+
+	// Process the paginated stream request
+	streamPage, err := s.unifiedProcessor.ProcessPaginatedStreamRequest(msgCtx.User, req, currentContextTokens)
+	if err != nil {
+		log.Printf("Unified stream processing failed for activity %d with mode %s: %v", activityID, processingMode, err)
+		return nil, fmt.Errorf("failed to process stream data: %w", err)
+	}
+
+	// Format the result using the unified processor's formatter
+	content := s.unifiedProcessor.FormatPaginatedResult(streamPage)
+
+	log.Printf("Successfully processed stream data for activity %d with mode %s (page %d/%d)",
+		activityID, processingMode, streamPage.PageNumber, streamPage.TotalPages)
+
+	return &ProcessedStreamResult{
+		ToolCallID:     fmt.Sprintf("streams_%d", activityID),
+		Content:        content,
+		ProcessingMode: processingMode,
+		Data:           streamPage,
+	}, nil
 }
 
 func (s *aiService) executeUpdateAthleteLogbook(ctx context.Context, msgCtx *MessageContext, content string) (*models.AthleteLogbook, error) {
@@ -1243,6 +1157,29 @@ func (s *aiService) executeUpdateAthleteLogbook(ctx context.Context, msgCtx *Mes
 	}
 
 	return logbook, nil
+}
+
+// estimateCurrentContextTokens estimates the current context usage for pagination decisions
+func (s *aiService) estimateCurrentContextTokens(msgCtx *MessageContext) int {
+	// Simple estimation based on conversation history
+	totalChars := 0
+
+	// Count characters in conversation history
+	for _, msg := range msgCtx.ConversationHistory {
+		totalChars += len(msg.Content)
+	}
+
+	// Add current message
+	totalChars += len(msgCtx.Message)
+
+	// Add system prompt (rough estimate)
+	totalChars += 2000
+
+	// Convert to tokens using the configured ratio
+	estimatedTokens := int(float64(totalChars) * s.config.StreamProcessing.TokenPerCharRatio)
+
+	log.Printf("Estimated current context tokens: %d (based on %d characters)", estimatedTokens, totalChars)
+	return estimatedTokens
 }
 
 // validateMessageContext validates the message context before processing
@@ -1350,4 +1287,55 @@ func (s *aiService) handleStravaError(err error, operation string) error {
 	default:
 		return fmt.Errorf("unable to retrieve %s from Strava: %v", operation, err)
 	}
+}
+// Exported tool execution methods for the tool execution endpoint
+
+// ExecuteGetAthleteProfile executes the get-athlete-profile tool
+func (s *aiService) ExecuteGetAthleteProfile(ctx context.Context, msgCtx *MessageContext) (string, error) {
+	return s.executeGetAthleteProfile(ctx, msgCtx)
+}
+
+// ExecuteGetRecentActivities executes the get-recent-activities tool
+func (s *aiService) ExecuteGetRecentActivities(ctx context.Context, msgCtx *MessageContext, perPage int) (string, error) {
+	return s.executeGetRecentActivities(ctx, msgCtx, perPage)
+}
+
+// ExecuteGetActivityDetails executes the get-activity-details tool
+func (s *aiService) ExecuteGetActivityDetails(ctx context.Context, msgCtx *MessageContext, activityID int64) (string, error) {
+	return s.executeGetActivityDetails(ctx, msgCtx, activityID)
+}
+
+// ExecuteGetActivityStreams executes the get-activity-streams tool
+func (s *aiService) ExecuteGetActivityStreams(ctx context.Context, msgCtx *MessageContext, activityID int64, streamTypes []string, resolution string, processingMode string, pageNumber int, pageSize int, summaryPrompt string) (string, error) {
+	// Handle different processing modes
+	if processingMode == "auto" || processingMode == "summary" || processingMode == "detailed" || processingMode == "paginated" {
+		// Use the processing version
+		result, err := s.executeGetActivityStreamsWithProcessing(ctx, msgCtx, activityID, streamTypes, resolution, processingMode, pageNumber, pageSize, summaryPrompt)
+		if err != nil {
+			return "", err
+		}
+		
+		// Return the content from the processed result
+		return result.Content, nil
+	} else {
+		// Use the basic version
+		streams, err := s.executeGetActivityStreams(ctx, msgCtx, activityID, streamTypes, resolution)
+		if err != nil {
+			return "", err
+		}
+		
+		// Convert streams to string format
+		return fmt.Sprintf("Stream data retrieved: %v", streams), nil
+	}
+}
+
+// ExecuteUpdateAthleteLogbook executes the update-athlete-logbook tool
+func (s *aiService) ExecuteUpdateAthleteLogbook(ctx context.Context, msgCtx *MessageContext, content string) (string, error) {
+	logbook, err := s.executeUpdateAthleteLogbook(ctx, msgCtx, content)
+	if err != nil {
+		return "", err
+	}
+	
+	// Return a success message with the updated content
+	return fmt.Sprintf("Logbook updated successfully. Content: %s", logbook.Content), nil
 }

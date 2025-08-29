@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Markdown Vega Loading</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .test-case { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
+        .loading { background: #f0f8ff; border-color: #87ceeb; }
+        .error { background: #ffe4e1; border-color: #ff6b6b; }
+        .success { background: #f0fff0; border-color: #90ee90; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Markdown Vega-Lite Loading Test</h1>
+        
+        <div class="test-case">
+            <h3>Test Content with Vega-Lite</h3>
+            <p>This simulates the content that might be causing the loading issue:</p>
+            <pre>
+# Chart Example
+
+Here's a simple bar chart:
+
+```vega-lite
+{
+  "mark": "bar",
+  "data": {
+    "values": [
+      {"category": "A", "value": 28},
+      {"category": "B", "value": 55},
+      {"category": "C", "value": 43}
+    ]
+  },
+  "encoding": {
+    "x": {"field": "category", "type": "nominal"},
+    "y": {"field": "value", "type": "quantitative"}
+  }
+}
+```
+            </pre>
+        </div>
+        
+        <div class="test-case">
+            <h3>Expected Behavior</h3>
+            <div class="success">
+                <p><strong>✓ Should show:</strong> "Loading chart libraries..." briefly</p>
+                <p><strong>✓ Then either:</strong> Render the chart OR show error with retry</p>
+                <p><strong>✗ Should NOT:</strong> Get stuck on "Loading chart component..." forever</p>
+            </div>
+        </div>
+        
+        <div class="test-case">
+            <h3>Root Cause Analysis</h3>
+            <div class="loading">
+                <p><strong>Issue:</strong> The ResponsiveVegaLiteDiagram component was getting stuck in loading state</p>
+                <p><strong>Cause:</strong> The react-vega import was failing or timing out without proper error handling</p>
+                <p><strong>Fix:</strong> Added timeout mechanism and better error handling</p>
+            </div>
+        </div>
+        
+        <div class="test-case">
+            <h3>Verification Steps</h3>
+            <ol>
+                <li>Open the main application</li>
+                <li>Navigate to a page with vega-lite charts</li>
+                <li>Check that charts either load or show error (not stuck loading)</li>
+                <li>If error shown, retry button should work</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>

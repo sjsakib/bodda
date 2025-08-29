@@ -410,6 +410,11 @@ func (s *stravaService) defaultMakeRequest(method, endpoint string, accessToken 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
+	fmt.Printf("Sending http request")
+	fmt.Printf("full url: %s", fullURL)
+	fmt.Printf("Token: %s", "Bearer "+accessToken)
+	fmt.Printf("Method: %s", method)
+
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		// Check for timeout errors
@@ -464,10 +469,16 @@ func (s *stravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, er
 			return nil, fmt.Errorf("failed to get athlete profile: %w", err)
 		}
 
+		// fmt.Println("body", )
+
 		var athlete StravaAthlete
 		if err := json.Unmarshal(body, &athlete); err != nil {
 			return nil, fmt.Errorf("failed to parse athlete profile: %w", err)
 		}
+
+		fmt.Printf("----------body----------------\n%s", string(body))
+
+		fmt.Printf("-----------xx----------------\nFTP: %d", athlete.FTP)
 
 		return &athlete, nil
 	}

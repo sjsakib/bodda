@@ -1,3 +1,173 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Diagram-specific styles for enhanced chat interface integration */
+@layer components {
+  /* Diagram code block containers */
+  .diagram-code-block {
+    @apply relative;
+  }
+  
+  .mermaid-code-block {
+    @apply bg-blue-50 border-blue-200;
+  }
+  
+  .vega-lite-code-block {
+    @apply bg-green-50 border-green-200;
+  }
+  
+  /* Diagram fallback styles */
+  .diagram-fallback {
+    @apply relative;
+  }
+  
+  .mermaid-fallback .bg-yellow-50 {
+    @apply border-l-4 border-l-blue-400;
+  }
+  
+  .vega-lite-fallback .bg-yellow-50 {
+    @apply border-l-4 border-l-green-400;
+  }
+  
+  /* Enhanced markdown content with diagrams */
+  .markdown-content.has-diagrams {
+    @apply space-y-4;
+  }
+  
+  /* Diagram loading states in chat */
+  .markdown-content .diagram-loading {
+    @apply bg-gray-50 border border-gray-200 rounded-lg p-4;
+  }
+  
+  /* Diagram error states in chat */
+  .markdown-content .diagram-error {
+    @apply bg-red-50 border border-red-200 rounded-lg p-4;
+  }
+  
+  /* Responsive diagram containers in chat messages */
+  .markdown-content .diagram-code-block {
+    @apply max-w-full overflow-hidden;
+  }
+  
+  /* Mobile-specific diagram styles */
+  @media (max-width: 640px) {
+    .markdown-content.has-diagrams {
+      @apply space-y-3;
+    }
+    
+    .diagram-code-block {
+      @apply mx-0;
+    }
+  }
+  
+  /* Diagram zoom controls styling */
+  .diagram-zoom-controls {
+    @apply absolute top-2 right-2 z-10 flex space-x-1 bg-white/90 backdrop-blur-sm rounded-lg p-1 shadow-sm border border-gray-200;
+  }
+  
+  .diagram-zoom-button {
+    @apply w-8 h-8 flex items-center justify-center rounded text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors;
+  }
+  
+  /* High contrast mode support for diagrams */
+  @media (prefers-contrast: high) {
+    .diagram-code-block {
+      @apply border-2 border-black;
+    }
+    
+    .diagram-zoom-controls {
+      @apply bg-white border-2 border-black;
+    }
+    
+    .diagram-zoom-button {
+      @apply text-black border border-black;
+    }
+  }
+  
+  /* Dark mode support for diagram containers */
+  @media (prefers-color-scheme: dark) {
+    .diagram-code-block {
+      @apply bg-gray-800 border-gray-600;
+    }
+    
+    .mermaid-code-block {
+      @apply bg-blue-900/20 border-blue-600;
+    }
+    
+    .vega-lite-code-block {
+      @apply bg-green-900/20 border-green-600;
+    }
+    
+    .diagram-zoom-controls {
+      @apply bg-gray-800/90 border-gray-600;
+    }
+    
+    .diagram-zoom-button {
+      @apply text-gray-300 hover:text-white hover:bg-gray-700;
+    }
+  }
+  
+  /* Smooth transitions for diagram state changes */
+  .diagram-code-block,
+  .diagram-fallback,
+  .diagram-loading,
+  .diagram-error {
+    @apply transition-all duration-200 ease-in-out;
+  }
+  
+  /* Focus styles for accessibility */
+  .diagram-code-block:focus-within {
+    @apply ring-2 ring-blue-500 ring-offset-2;
+  }
+  
+  /* Print styles for diagrams */
+  @media print {
+    .diagram-zoom-controls {
+      @apply hidden;
+    }
+    
+    .diagram-code-block {
+      @apply break-inside-avoid;
+    }
+  }
+  
+  /* Chat message integration styles */
+  .chat-message-container {
+    @apply relative overflow-visible;
+  }
+  
+  .chat-message-content {
+    @apply w-full;
+  }
+  
+  /* Ensure diagrams don't break chat message layout */
+  .chat-message-container .diagram-code-block {
+    @apply w-full max-w-full;
+  }
+  
+  /* Adjust diagram margins in chat messages */
+  .chat-message-content .diagram-code-block:first-child {
+    @apply mt-0;
+  }
+  
+  .chat-message-content .diagram-code-block:last-child {
+    @apply mb-0;
+  }
+  
+  /* Streaming message diagram handling */
+  .chat-message-streaming .diagram-code-block {
+    @apply opacity-75;
+  }
+  
+  /* Mobile chat message diagram adjustments */
+  @media (max-width: 640px) {
+    .chat-message-container .diagram-code-block {
+      @apply mx-0 rounded-md;
+    }
+    
+    .chat-message-content .diagram-zoom-controls {
+      @apply scale-90;
+    }
+  }
+}

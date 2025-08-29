@@ -11,6 +11,39 @@ import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 import { HamburgerIcon } from './HamburgerIcon';
 import SuggestionPills from './SuggestionPills';
 
+// Utility function to check if diagram content is complete
+const isDiagramContentComplete = (content: string): boolean => {
+  // Check for incomplete Mermaid diagrams
+  const mermaidMatches = content.match(/```mermaid\s*\n([\s\S]*?)(?:\n```|$)/g);
+  if (mermaidMatches) {
+    for (const match of mermaidMatches) {
+      if (!match.endsWith('\n```')) {
+        return false; // Incomplete Mermaid diagram
+      }
+    }
+  }
+  
+  // Check for incomplete Vega-Lite diagrams
+  const vegaMatches = content.match(/```vega-lite\s*\n([\s\S]*?)(?:\n```|$)/g);
+  if (vegaMatches) {
+    for (const match of vegaMatches) {
+      if (!match.endsWith('\n```')) {
+        return false; // Incomplete Vega-Lite diagram
+      }
+      
+      // Additional check for valid JSON structure
+      try {
+        const jsonContent = match.replace(/```vega-lite\s*\n/, '').replace(/\n```$/, '');
+        JSON.parse(jsonContent);
+      } catch {
+        return false; // Invalid JSON in Vega-Lite diagram
+      }
+    }
+  }
+  
+  return true;
+};
+
 export default function ChatInterface() {
   const params = useParams<{ sessionId: string }>();
   const sessionId = params?.sessionId;
@@ -427,13 +460,21 @@ export default function ChatInterface() {
                   className={`max-w-full sm:max-w-2xl lg:max-w-3xl rounded-lg px-3 sm:px-4 py-2 sm:py-3 ${
                     message.role === 'user'
                       ? 'bg-blue-600 text-white'
-                      : 'bg-white border border-gray-200'
+                      : `bg-white border border-gray-200 chat-message-container ${
+                          isStreaming && !isDiagramContentComplete(message.content) 
+                            ? 'chat-message-streaming' 
+                            : ''
+                        }`
                   }`}
                 >
                   {message.role === 'assistant' ? (
                     <SafeMarkdownRenderer
                       content={message.content}
-                      className='max-w-none'
+                      className='max-w-none chat-message-content'
+                      enableDiagrams={true}
+                      diagramTheme='auto'
+                      enableDiagramZoomPan={true}
+                      showVegaActions={false}
                     />
                   ) : (
                     <div className='whitespace-pre-wrap text-sm sm:text-base'>
@@ -454,7 +495,7 @@ export default function ChatInterface() {
 
           {isStreaming && (
             <div className='flex justify-start'>
-              <div className='bg-white border border-gray-200 rounded-lg px-4 py-3'>
+              <div className='bg-white border border-gray-200 rounded-lg px-4 py-3 chat-message-streaming'>
                 <div className='flex items-center space-x-2'>
                   <LoadingSpinner size='sm' />
                   <span className='text-sm text-gray-500'>AI is thinking...</span>

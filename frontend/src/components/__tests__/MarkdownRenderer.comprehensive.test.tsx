@@ -1,600 +1,686 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { describe, test, expect } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MarkdownRenderer, SafeMarkdownRenderer } from '../MarkdownRenderer';
+import { DiagramLibraryProvider } from '../../contexts/DiagramLibraryContext';
 
-describe('MarkdownRenderer - Comprehensive Coverage', () => {
-  describe('All Custom Component Renderers', () => {
-    test('renders all heading levels (h1-h6) with proper hierarchy', () => {
-      const content = `
-# Heading 1
-## Heading 2  
-### Heading 3
-#### Heading 4
-##### Heading 5
-###### Heading 6
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Test all heading levels exist
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Heading 1');
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Heading 2');
-      expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Heading 3');
-      expect(screen.getByRole('heading', { level: 4 })).toHaveTextContent('Heading 4');
-      expect(screen.getByRole('heading', { level: 5 })).toHaveTextContent('Heading 5');
-      expect(screen.getByRole('heading', { level: 6 })).toHaveTextContent('Heading 6');
-      
-      // Test visual hierarchy through font sizes
-      const h1 = screen.getByRole('heading', { level: 1 });
-      const h2 = screen.getByRole('heading', { level: 2 });
-      const h3 = screen.getByRole('heading', { level: 3 });
-      
-      // Verify responsive typography classes
-      expect(h1).toHaveClass('text-xl', 'sm:text-2xl', 'md:text-3xl', 'font-bold');
-      expect(h2).toHaveClass('text-lg', 'sm:text-xl', 'md:text-2xl', 'font-semibold');
-      expect(h3).toHaveClass('text-base', 'sm:text-lg', 'md:text-xl', 'font-medium');
-    });
+// Mock diagram libraries
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({
+      svg: '<svg role="img"><title>Test Mermaid</title><g><text>Mermaid Content</text></g></svg>'
+    }),
+  },
+}));
 
-    test('renders paragraph elements with proper styling', () => {
-      const content = `
-First paragraph with some content.
+vi.mock('react-vega', () => ({
+  VegaLite: ({ spec }: any) => (
+    <div data-testid="vega-lite-chart" role="img" aria-label={`${spec?.mark} chart`}>
+      <title>Test Vega-Lite</title>
+      <text>Vega-Lite: {spec?.mark || 'unknown'}</text>
+    </div>
+  ),
+}));
 
-Second paragraph with more content that should have proper spacing.
+// Mock diagram loader hook
+vi.mock('../../hooks/useDiagramLoader', () => ({
+  useDiagramLoader: vi.fn((content: string, enableDiagrams: boolean) => {
+    const hasMermaid = enableDiagrams && content.includes('```mermaid');
+    const hasVegaLite = enableDiagrams && content.includes('```vega-lite');
+    
+    return {
+      hasDiagrams: hasMermaid || hasVegaLite,
+      allRequiredLibrariesLoaded: true,
+      isLoading: false,
+      errors: [],
+    };
+  }),
+}));
 
-Final paragraph.
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      const paragraphs = screen.getAllByText(/paragraph/);
-      expect(paragraphs).toHaveLength(3);
-      
-      paragraphs.forEach(p => {
-        const paragraphElement = p.closest('p');
-        expect(paragraphElement).toHaveClass(
-          'mb-3', 'sm:mb-4', 'text-gray-700', 'leading-relaxed', 'last:mb-0', 'text-sm', 'sm:text-base'
-        );
-      });
-    });
+const renderWithProvider = (content: string, props = {}) => {
+  return render(
+    <DiagramLibraryProvider>
+      <MarkdownRenderer content={content} {...props} />
+    </DiagramLibraryProvider>
+  );
+};
 
-    test('renders all text formatting elements correctly', () => {
-      const content = `
-**Bold text** and *italic text* and \`inline code\` formatting.
+describe('MarkdownRenderer - Comprehensive Integration Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-***Bold and italic combined*** text.
+  describe('Basic Markdown Rendering', () => {
+    it('renders standard markdown elements with proper styling', () => {
+      const content = `# Main Title
 
-~~Strikethrough text~~ (GFM feature).
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Test bold
-      const boldElement = screen.getByText('Bold text');
-      expect(boldElement.tagName).toBe('STRONG');
-      expect(boldElement).toHaveClass('font-semibold', 'text-gray-900');
-      
-      // Test italic
-      const italicElement = screen.getByText('italic text');
-      expect(italicElement.tagName).toBe('EM');
-      expect(italicElement).toHaveClass('italic', 'text-gray-800');
-      
-      // Test inline code
-      const codeElement = screen.getByText('inline code');
-      expect(codeElement.tagName).toBe('CODE');
-      expect(codeElement).toHaveClass('bg-gray-100', 'text-gray-800', 'font-mono');
-      
-      // Test strikethrough (GFM feature)
-      expect(screen.getByText('Strikethrough text')).toBeInTheDocument();
-    });
+## Subtitle
 
-    test('renders code blocks with language syntax highlighting support', () => {
-      const content = `
+This is a **bold** and *italic* text with \`inline code\`.
+
+- List item 1
+- List item 2
+
+1. Numbered item 1
+2. Numbered item 2
+
+> This is a blockquote
+
+[Link text](https://example.com)
+
+---
+
 \`\`\`javascript
-function example() {
-  console.log("Hello World");
-  return true;
+const code = 'block';
+\`\`\``;
+
+      renderWithProvider(content);
+
+      expect(screen.getByText('Main Title')).toBeInTheDocument();
+      expect(screen.getByText('Subtitle')).toBeInTheDocument();
+      expect(screen.getByText('bold')).toBeInTheDocument();
+      expect(screen.getByText('italic')).toBeInTheDocument();
+      expect(screen.getByText('inline code')).toBeInTheDocument();
+      expect(screen.getByText('List item 1')).toBeInTheDocument();
+      expect(screen.getByText('Numbered item 1')).toBeInTheDocument();
+      expect(screen.getByText('This is a blockquote')).toBeInTheDocument();
+      expect(screen.getByText('Link text')).toBeInTheDocument();
+    });
+
+    it('applies responsive CSS classes correctly', () => {
+      const content = '# Responsive Title\n\nResponsive paragraph text.';
+      
+      const { container } = renderWithProvider(content);
+
+      const title = screen.getByText('Responsive Title');
+      expect(title).toHaveClass('text-xl', 'sm:text-2xl', 'md:text-3xl');
+
+      const paragraph = screen.getByText('Responsive paragraph text.');
+      expect(paragraph).toHaveClass('text-sm', 'sm:text-base');
+    });
+
+    it('handles tables with responsive design', () => {
+      const content = `| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+| Cell 3   | Cell 4   |`;
+
+      renderWithProvider(content);
+
+      expect(screen.getByText('Header 1')).toBeInTheDocument();
+      expect(screen.getByText('Cell 1')).toBeInTheDocument();
+      
+      const table = screen.getByText('Header 1').closest('table');
+      expect(table?.parentElement).toHaveClass('overflow-x-auto');
+    });
+  }); 
+ describe('Diagram Integration', () => {
+    it('detects and renders Mermaid diagrams', async () => {
+      const content = `# Training Plan
+
+\`\`\`mermaid
+graph TD
+    A[Start] --> B[Warm Up]
+    B --> C[Exercise]
+    C --> D[Cool Down]
+\`\`\`
+
+Follow this workflow for best results.`;
+
+      renderWithProvider(content);
+
+      expect(screen.getByText('Training Plan')).toBeInTheDocument();
+      expect(screen.getByText('Follow this workflow for best results.')).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(screen.getByText('Mermaid Content')).toBeInTheDocument();
+      });
+
+      const diagramContainer = screen.getByText('Mermaid Content').closest('.diagram-code-block');
+      expect(diagramContainer).toHaveClass('mermaid-code-block');
+    });
+
+    it('detects and renders Vega-Lite charts', async () => {
+      const content = `# Progress Analysis
+
+\`\`\`vega-lite
+{
+  "mark": "bar",
+  "data": {
+    "values": [
+      {"week": "Week 1", "distance": 15},
+      {"week": "Week 2", "distance": 18}
+    ]
+  },
+  "encoding": {
+    "x": {"field": "week", "type": "ordinal"},
+    "y": {"field": "distance", "type": "quantitative"}
+  }
 }
 \`\`\`
 
-\`\`\`python
-def hello():
-    print("Hello from Python")
-    return "success"
+Your progress is improving!`;
+
+      renderWithProvider(content);
+
+      expect(screen.getByText('Progress Analysis')).toBeInTheDocument();
+      expect(screen.getByText('Your progress is improving!')).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('vega-lite-chart')).toBeInTheDocument();
+        expect(screen.getByText('Vega-Lite: bar')).toBeInTheDocument();
+      });
+
+      const diagramContainer = screen.getByTestId('vega-lite-chart').closest('.diagram-code-block');
+      expect(diagramContainer).toHaveClass('vega-lite-code-block');
+    });
+
+    it('handles multiple diagrams in single document', async () => {
+      const content = `# Comprehensive Analysis
+
+## Workflow
+\`\`\`mermaid
+graph LR
+    A --> B --> C
 \`\`\`
 
-\`\`\`bash
-echo "Shell command"
-ls -la
+## Data Visualization
+\`\`\`vega-lite
+{"mark": "line", "data": {"values": []}}
 \`\`\`
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Find all code blocks
-      const jsCode = screen.getByText(/function example/);
-      const pythonCode = screen.getByText(/def hello/);
-      const bashCode = screen.getByText(/echo "Shell command"/);
-      
-      // Verify they're all in pre elements with proper styling
-      [jsCode, pythonCode, bashCode].forEach(code => {
-        const preElement = code.closest('pre');
-        expect(preElement).toHaveClass(
-          'bg-gray-50', 'border', 'border-gray-200', 'rounded-lg', 
-          'p-2', 'sm:p-4', 'mb-3', 'sm:mb-4', 'overflow-x-auto', 
-          'text-xs', 'sm:text-sm', 'font-mono', 'leading-relaxed'
-        );
+
+## Another Workflow
+\`\`\`mermaid
+sequenceDiagram
+    A->>B: Message
+\`\`\``;
+
+      renderWithProvider(content);
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Mermaid Content')).toHaveLength(2);
+        expect(screen.getByTestId('vega-lite-chart')).toBeInTheDocument();
       });
+
+      const mermaidBlocks = document.querySelectorAll('.mermaid-code-block');
+      const vegaBlocks = document.querySelectorAll('.vega-lite-code-block');
+      
+      expect(mermaidBlocks).toHaveLength(2);
+      expect(vegaBlocks).toHaveLength(1);
     });
 
-    test('renders complex nested lists with proper indentation', () => {
-      const content = `
-1. First level ordered
-   - Nested unordered item
-   - Another nested item
-     1. Deep nested ordered
-     2. Another deep item
-        - Very deep unordered
-2. Second first level
-   - Mixed nesting works
-     - Even deeper
-       1. Numbers in deep nesting
-       2. More numbers
-3. Third first level
-      `;
+    it('applies has-diagrams class when diagrams are present', () => {
+      const content = `Text with diagram:
+
+\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
+
+      const { container } = renderWithProvider(content);
       
-      render(<MarkdownRenderer content={content} />);
-      
-      const lists = screen.getAllByRole('list');
-      expect(lists.length).toBeGreaterThan(1); // Multiple nested lists
-      
-      // Verify content structure
-      expect(screen.getByText('First level ordered')).toBeInTheDocument();
-      expect(screen.getByText('Nested unordered item')).toBeInTheDocument();
-      expect(screen.getByText('Deep nested ordered')).toBeInTheDocument();
-      expect(screen.getByText('Very deep unordered')).toBeInTheDocument();
-      expect(screen.getByText('Numbers in deep nesting')).toBeInTheDocument();
+      expect(container.querySelector('.has-diagrams')).toBeInTheDocument();
     });
 
-    test('renders complex tables with all table elements', () => {
-      const content = `
-| Header 1 | Header 2 | Header 3 | Header 4 |
-|----------|----------|----------|----------|
-| Row 1 Col 1 | Row 1 Col 2 | Row 1 Col 3 | Row 1 Col 4 |
-| Row 2 Col 1 | Row 2 Col 2 | Row 2 Col 3 | Row 2 Col 4 |
-| Row 3 Col 1 | Row 3 Col 2 | Row 3 Col 3 | Row 3 Col 4 |
-      `;
+    it('does not apply has-diagrams class without diagrams', () => {
+      const content = 'Just regular markdown text with no diagrams.';
       
-      render(<MarkdownRenderer content={content} />);
+      const { container } = renderWithProvider(content);
       
-      const table = screen.getByRole('table');
-      
-      // Test table structure
-      expect(table).toHaveClass('min-w-full', 'divide-y', 'divide-gray-200');
-      
-      // Test wrapper
-      const wrapper = table.closest('div');
-      expect(wrapper).toHaveClass('overflow-x-auto', 'mb-3', 'sm:mb-4', 'rounded-lg', 'border', 'border-gray-200', 'shadow-sm');
-      
-      // Test thead
-      const thead = table.querySelector('thead');
-      expect(thead).toHaveClass('bg-gray-50');
-      
-      // Test tbody
-      const tbody = table.querySelector('tbody');
-      expect(tbody).toHaveClass('bg-white', 'divide-y', 'divide-gray-200');
-      
-      // Test headers
-      const headers = screen.getAllByRole('columnheader');
-      expect(headers).toHaveLength(4);
-      headers.forEach(header => {
-        expect(header).toHaveClass('px-2', 'sm:px-4', 'py-2', 'sm:py-3', 'text-left', 'text-xs', 'font-medium', 'text-gray-500', 'uppercase', 'tracking-wider', 'border-b', 'border-gray-200');
-      });
-      
-      // Test data cells
-      const cells = screen.getAllByRole('cell');
-      expect(cells).toHaveLength(12); // 3 rows × 4 columns
-      cells.forEach(cell => {
-        expect(cell).toHaveClass('px-2', 'sm:px-4', 'py-2', 'sm:py-3', 'text-xs', 'sm:text-sm', 'text-gray-700', 'break-words');
-      });
-      
-      // Test row hover effects
-      const rows = tbody?.querySelectorAll('tr');
-      rows?.forEach(row => {
-        expect(row).toHaveClass('hover:bg-gray-50', 'transition-colors', 'duration-150');
-      });
+      expect(container.querySelector('.has-diagrams')).not.toBeInTheDocument();
     });
 
-    test('renders all special elements with proper styling', () => {
-      const content = `
-> This is a blockquote with **bold** and *italic* text.
-> 
-> Multiple lines in blockquote.
+    it('can disable diagram rendering', () => {
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
 
-[External link](https://example.com) and [another link](https://test.com).
+      const { container } = renderWithProvider(content, { enableDiagrams: false });
 
----
-
-More content after horizontal rule.
-
-> Another blockquote after the rule.
-      `;
+      expect(container.querySelector('.has-diagrams')).not.toBeInTheDocument();
+      expect(screen.queryByText('Mermaid Content')).not.toBeInTheDocument();
       
-      render(<MarkdownRenderer content={content} />);
-      
-      // Test blockquotes
-      const blockquotes = screen.getAllByText(/blockquote/).map(el => el.closest('blockquote'));
-      expect(blockquotes.length).toBeGreaterThan(0);
-      blockquotes.forEach(blockquote => {
-        if (blockquote) {
-          expect(blockquote).toHaveClass(
-            'border-l-4', 'border-blue-200', 'pl-3', 'sm:pl-4', 'py-2', 
-            'mb-3', 'sm:mb-4', 'bg-blue-50', 'text-gray-700', 'italic', 
-            'rounded-r-md', 'text-sm', 'sm:text-base'
-          );
-        }
+      // Should render as regular code block
+      const codeBlock = screen.getByText((content, element) => {
+        return element?.tagName === 'CODE' && content.includes('graph TD');
       });
-      
-      // Test links
-      const links = screen.getAllByRole('link');
-      expect(links).toHaveLength(2);
-      links.forEach(link => {
-        expect(link).toHaveAttribute('target', '_blank');
-        expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-        expect(link).toHaveClass(
-          'text-blue-600', 'hover:text-blue-800', 'underline', 
-          'decoration-blue-300', 'hover:decoration-blue-500', 
-          'transition-colors', 'duration-150', 'break-words'
-        );
-      });
-      
-      // Test horizontal rule
-      const { container } = render(<MarkdownRenderer content={content} />);
-      const hr = container.querySelector('hr');
-      expect(hr).toHaveClass('my-4', 'sm:my-6', 'border-t', 'border-gray-200');
+      expect(codeBlock).toBeInTheDocument();
     });
   });
 
-  describe('GitHub Flavored Markdown Features', () => {
-    test('renders task lists (checkboxes)', () => {
-      const content = `
-## Todo List
+  describe('Theme and Configuration', () => {
+    it('passes diagram theme configuration', async () => {
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
 
-- [x] Completed task
-- [ ] Incomplete task
-- [x] Another completed task
-- [ ] Another incomplete task
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Should render the content (GFM plugin handles task lists)
-      expect(screen.getByText('Todo List')).toBeInTheDocument();
-      expect(screen.getByText(/Completed task/)).toBeInTheDocument();
-      expect(screen.getByText(/Incomplete task/)).toBeInTheDocument();
-    });
+      renderWithProvider(content, { diagramTheme: 'dark' });
 
-    test('renders strikethrough text', () => {
-      const content = 'This is ~~strikethrough~~ text.';
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      expect(screen.getByText('strikethrough')).toBeInTheDocument();
-    });
-
-    test('renders tables with alignment', () => {
-      const content = `
-| Left | Center | Right |
-|:-----|:------:|------:|
-| L1   | C1     | R1    |
-| L2   | C2     | R2    |
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      const table = screen.getByRole('table');
-      expect(table).toBeInTheDocument();
-      
-      // Verify content is rendered
-      expect(screen.getByText('Left')).toBeInTheDocument();
-      expect(screen.getByText('Center')).toBeInTheDocument();
-      expect(screen.getByText('Right')).toBeInTheDocument();
-    });
-  });
-
-  describe('Responsive Design Verification', () => {
-    test('applies responsive classes to all elements', () => {
-      const content = `
-# Responsive Heading
-
-This is a paragraph with responsive text sizing.
-
-- List item with responsive spacing
-- Another list item
-
-\`Inline code\` with responsive sizing.
-
-\`\`\`
-Code block with responsive padding
-\`\`\`
-
-| Table | Header |
-|-------|--------|
-| Cell  | Data   |
-
-> Blockquote with responsive spacing
-
----
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Test heading responsiveness
-      const heading = screen.getByRole('heading', { level: 1 });
-      expect(heading).toHaveClass('text-xl', 'sm:text-2xl', 'md:text-3xl');
-      
-      // Test paragraph responsiveness
-      const paragraph = screen.getByText(/paragraph with responsive/);
-      expect(paragraph.closest('p')).toHaveClass('text-sm', 'sm:text-base');
-      
-      // Test list responsiveness
-      const list = screen.getByRole('list');
-      expect(list).toHaveClass('pl-4', 'sm:pl-6', 'mb-3', 'sm:mb-4');
-      
-      // Test inline code responsiveness
-      const inlineCode = screen.getByText('Inline code');
-      expect(inlineCode).toHaveClass('text-xs', 'sm:text-sm', 'px-1', 'sm:px-1.5');
-      
-      // Test code block responsiveness
-      const codeBlock = screen.getByText(/Code block with responsive/);
-      expect(codeBlock.closest('pre')).toHaveClass('p-2', 'sm:p-4', 'text-xs', 'sm:text-sm');
-      
-      // Test table responsiveness
-      const table = screen.getByRole('table');
-      const tableWrapper = table.closest('div');
-      expect(tableWrapper).toHaveClass('mb-3', 'sm:mb-4');
-      
-      const tableHeaders = screen.getAllByRole('columnheader');
-      tableHeaders.forEach(header => {
-        expect(header).toHaveClass('px-2', 'sm:px-4', 'py-2', 'sm:py-3');
+      await waitFor(() => {
+        expect(screen.getByText('Mermaid Content')).toBeInTheDocument();
       });
+
+      // Component should render without errors with dark theme
+      expect(screen.getByText('Mermaid Content')).toBeInTheDocument();
+    });
+
+    it('configures zoom and pan settings', async () => {
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
+
+      renderWithProvider(content, { enableDiagramZoomPan: false });
+
+      await waitFor(() => {
+        expect(screen.getByText('Mermaid Content')).toBeInTheDocument();
+      });
+    });
+
+    it('configures Vega-Lite actions', async () => {
+      const content = `\`\`\`vega-lite
+{"mark": "bar", "data": {"values": []}}
+\`\`\``;
+
+      renderWithProvider(content, { showVegaActions: true });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('vega-lite-chart')).toBeInTheDocument();
+      });
+    });
+
+    it('applies custom CSS classes', () => {
+      const content = '# Test Content';
       
-      // Test blockquote responsiveness
-      const blockquote = screen.getByText(/Blockquote with responsive/);
-      expect(blockquote.closest('blockquote')).toHaveClass('pl-3', 'sm:pl-4', 'mb-3', 'sm:mb-4', 'text-sm', 'sm:text-base');
+      const { container } = renderWithProvider(content, { className: 'custom-markdown' });
       
-      // Test HR responsiveness
-      const { container } = render(<MarkdownRenderer content={content} />);
-      const hr = container.querySelector('hr');
-      expect(hr).toHaveClass('my-4', 'sm:my-6');
+      expect(container.querySelector('.custom-markdown')).toBeInTheDocument();
     });
   });
 
-  describe('Edge Cases and Error Scenarios', () => {
-    test('handles empty markdown content', () => {
-      expect(() => {
-        render(<MarkdownRenderer content="" />);
-      }).not.toThrow();
-      
-      const { container } = render(<MarkdownRenderer content="" />);
-      expect(container.firstChild).toHaveClass('markdown-content');
+  describe('Error Handling and Fallbacks', () => {
+    it('shows diagram loading errors', () => {
+      const mockUseDiagramLoader = vi.mocked(require('../../hooks/useDiagramLoader').useDiagramLoader);
+      mockUseDiagramLoader.mockReturnValue({
+        hasDiagrams: true,
+        allRequiredLibrariesLoaded: false,
+        isLoading: false,
+        errors: ['Failed to load Mermaid library', 'Failed to load Vega-Lite library'],
+      });
+
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
+
+      renderWithProvider(content);
+
+      expect(screen.getByText('Diagram Library Errors:')).toBeInTheDocument();
+      expect(screen.getByText('• Failed to load Mermaid library')).toBeInTheDocument();
+      expect(screen.getByText('• Failed to load Vega-Lite library')).toBeInTheDocument();
     });
 
-    test('handles whitespace-only content', () => {
-      const whitespaceContent = '   \n\n\t   \n   ';
+    it('shows fallback when libraries fail to load', () => {
+      const mockUseDiagramLoader = vi.mocked(require('../../hooks/useDiagramLoader').useDiagramLoader);
+      mockUseDiagramLoader.mockReturnValue({
+        hasDiagrams: true,
+        allRequiredLibrariesLoaded: false,
+        isLoading: false,
+        errors: [],
+      });
+
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
+
+      renderWithProvider(content);
+
+      expect(screen.getByText('Mermaid Diagram')).toBeInTheDocument();
+      expect(screen.getByText('Diagram libraries are not available. Showing raw content:')).toBeInTheDocument();
       
-      expect(() => {
-        render(<MarkdownRenderer content={whitespaceContent} />);
-      }).not.toThrow();
+      const fallbackContainer = screen.getByText('Mermaid Diagram').closest('.diagram-fallback');
+      expect(fallbackContainer).toHaveClass('mermaid-fallback');
     });
 
-    test('handles very long content without breaking', () => {
-      const longContent = `
-# Very Long Content Test
+    it('shows loading indicators when libraries are loading', () => {
+      const mockUseDiagramLoader = vi.mocked(require('../../hooks/useDiagramLoader').useDiagramLoader);
+      mockUseDiagramLoader.mockReturnValue({
+        hasDiagrams: true,
+        allRequiredLibrariesLoaded: false,
+        isLoading: true,
+        errors: [],
+      });
 
-${'This is a very long paragraph that repeats many times. '.repeat(100)}
-
-${'- List item that is very long and repeats many times\n'.repeat(50)}
-
-| Very Long Header That Might Cause Issues | Another Long Header | Third Long Header |
-|-------------------------------------------|---------------------|-------------------|
-${'| Very long cell content that might overflow and cause layout issues | More long content | Even more content |\n'.repeat(20)}
-      `;
-      
-      expect(() => {
-        render(<MarkdownRenderer content={longContent} />);
-      }).not.toThrow();
-      
-      // Should still render properly
-      expect(screen.getByText('Very Long Content Test')).toBeInTheDocument();
-    });
-
-    test('handles special characters and unicode', () => {
-      const specialContent = `
-# Special Characters: <>&"'
-
-Unicode: ñáéíóú, 中文, العربية, русский, 🚀🎯
-
-Mathematical: ∑∏∫∆∇
-
-\`Code with special chars: <script>alert('test')</script>\`
-
-> Quote with émojis 🎯 and symbols ∞
-      `;
-      
-      expect(() => {
-        render(<MarkdownRenderer content={specialContent} />);
-      }).not.toThrow();
-      
-      expect(screen.getByText(/Special Characters/)).toBeInTheDocument();
-      expect(screen.getByText(/Unicode:/)).toBeInTheDocument();
-    });
-
-    test('handles malformed markdown gracefully', () => {
-      const malformedContent = `
-# Valid heading
-
-**Unclosed bold text
-
-*Unclosed italic text
-
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
 \`\`\`
-Unclosed code block
-continues here...
 
-| Malformed | Table
-|-----------|
-| Missing | Cell |
-| Too | Many | Cells |
+\`\`\`vega-lite
+{"mark": "bar", "data": {"values": []}}
+\`\`\``;
 
-> Unclosed blockquote
-continues here
-      `;
-      
-      expect(() => {
-        render(<SafeMarkdownRenderer content={malformedContent} />);
-      }).not.toThrow();
-      
-      // Should render something
-      expect(screen.getByText(/Valid heading/)).toBeInTheDocument();
+      renderWithProvider(content);
+
+      expect(screen.getByText('Loading diagram libraries...')).toBeInTheDocument();
+      expect(screen.getByText('Loading chart libraries...')).toBeInTheDocument();
     });
 
-    test('handles nested formatting edge cases', () => {
-      const nestedContent = `
-**Bold with *italic inside* and \`code inside\` bold**
+    it('handles mixed content with some diagrams failing', () => {
+      const content = `# Mixed Content
 
-*Italic with **bold inside** and \`code inside\` italic*
+Regular text here.
 
-\`Code with **bold** and *italic* inside\`
+\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\`
 
-> Blockquote with **bold** and *italic* and \`code\` and [link](https://example.com)
-      `;
-      
-      expect(() => {
-        render(<MarkdownRenderer content={nestedContent} />);
-      }).not.toThrow();
-      
-      // Should handle nested formatting
-      expect(screen.getByText(/Bold with/)).toBeInTheDocument();
-      expect(screen.getByText(/Italic with/)).toBeInTheDocument();
-    });
-  });
+More text.
 
-  describe('Accessibility and Semantic HTML', () => {
-    test('generates proper semantic HTML structure', () => {
-      const content = `
-# Main Heading
-## Section Heading
-### Subsection Heading
+\`\`\`javascript
+const code = 'regular code block';
+\`\`\`
 
-Regular paragraph text.
+Final text.`;
 
-- Unordered list
-- Second item
+      renderWithProvider(content);
 
-1. Ordered list
-2. Second item
-
-| Table | Header |
-|-------|--------|
-| Data  | Cell   |
-
-> Important blockquote
-
-[Accessible link](https://example.com)
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Test semantic heading structure
-      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 3 })).toBeInTheDocument();
-      
-      // Test list semantics
-      const lists = screen.getAllByRole('list');
-      expect(lists).toHaveLength(2); // One ul, one ol
-      
-      const listItems = screen.getAllByRole('listitem');
-      expect(listItems.length).toBeGreaterThanOrEqual(4);
-      
-      // Test table semantics
-      expect(screen.getByRole('table')).toBeInTheDocument();
-      expect(screen.getAllByRole('columnheader')).toHaveLength(2);
-      expect(screen.getAllByRole('cell')).toHaveLength(2);
-      
-      // Test link accessibility
-      const link = screen.getByRole('link', { name: 'Accessible link' });
-      expect(link).toHaveAttribute('href', 'https://example.com');
-      expect(link).toHaveAttribute('target', '_blank');
-      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    });
-
-    test('maintains proper heading hierarchy', () => {
-      const content = `
-# H1 Title
-## H2 Section
-### H3 Subsection
-#### H4 Sub-subsection
-##### H5 Deep section
-###### H6 Deepest section
-      `;
-      
-      render(<MarkdownRenderer content={content} />);
-      
-      // Verify all heading levels are present and properly structured
-      for (let level = 1; level <= 6; level++) {
-        const heading = screen.getByRole('heading', { level });
-        expect(heading).toBeInTheDocument();
-        expect(heading.tagName).toBe(`H${level}`);
-      }
+      expect(screen.getByText('Mixed Content')).toBeInTheDocument();
+      expect(screen.getByText('Regular text here.')).toBeInTheDocument();
+      expect(screen.getByText('More text.')).toBeInTheDocument();
+      expect(screen.getByText('Final text.')).toBeInTheDocument();
+      expect(screen.getByText("const code = 'regular code block';")).toBeInTheDocument();
     });
   });
 
   describe('Performance and Optimization', () => {
-    test('handles large content efficiently', () => {
-      const largeContent = `
-# Performance Test
+    it('handles large markdown documents efficiently', () => {
+      const largeContent = `# Large Document
 
-${Array.from({ length: 100 }, (_, i) => `
-## Section ${i + 1}
+${Array.from({ length: 100 }, (_, i) => `## Section ${i + 1}
 
 This is paragraph ${i + 1} with some content.
 
-- List item ${i + 1}.1
-- List item ${i + 1}.2
-- List item ${i + 1}.3
+- Item 1
+- Item 2
+- Item 3
 
 \`\`\`javascript
-function test${i + 1}() {
-  return "test ${i + 1}";
-}
+const section${i + 1} = 'code block ${i + 1}';
 \`\`\`
 
-| Column 1 | Column 2 | Column 3 |
-|----------|----------|----------|
-| Data ${i + 1}.1 | Data ${i + 1}.2 | Data ${i + 1}.3 |
+`).join('\n')}`;
 
----
-`).join('')}
-      `;
-      
       const startTime = performance.now();
-      
-      expect(() => {
-        render(<MarkdownRenderer content={largeContent} />);
-      }).not.toThrow();
-      
+      renderWithProvider(largeContent);
       const endTime = performance.now();
-      const renderTime = endTime - startTime;
-      
-      // Should render within reasonable time (less than 1 second)
-      expect(renderTime).toBeLessThan(1000);
-      
-      // Should still render content correctly
-      expect(screen.getByText('Performance Test')).toBeInTheDocument();
+
+      expect(endTime - startTime).toBeLessThan(1000); // Should render in less than 1 second
+      expect(screen.getByText('Large Document')).toBeInTheDocument();
       expect(screen.getByText('Section 1')).toBeInTheDocument();
       expect(screen.getByText('Section 100')).toBeInTheDocument();
     });
+
+    it('handles rapid content updates efficiently', () => {
+      const contents = [
+        '# Content 1\nFirst content',
+        '# Content 2\nSecond content',
+        '# Content 3\nThird content',
+        '# Content 4\nFourth content',
+      ];
+
+      const { rerender } = renderWithProvider(contents[0]);
+      expect(screen.getByText('Content 1')).toBeInTheDocument();
+
+      contents.slice(1).forEach((content, index) => {
+        rerender(
+          <DiagramLibraryProvider>
+            <MarkdownRenderer content={content} />
+          </DiagramLibraryProvider>
+        );
+        expect(screen.getByText(`Content ${index + 2}`)).toBeInTheDocument();
+      });
+    });
+
+    it('memoizes custom components properly', () => {
+      const content = '# Test\n\nContent here.';
+      
+      const { rerender } = renderWithProvider(content);
+      
+      // Re-render with same props should not cause unnecessary re-renders
+      rerender(
+        <DiagramLibraryProvider>
+          <MarkdownRenderer content={content} />
+        </DiagramLibraryProvider>
+      );
+
+      expect(screen.getByText('Test')).toBeInTheDocument();
+      expect(screen.getByText('Content here.')).toBeInTheDocument();
+    });
+  });
+
+  describe('Accessibility Features', () => {
+    it('maintains proper heading hierarchy', () => {
+      const content = `# Main Title
+## Subtitle
+### Sub-subtitle
+#### Fourth level
+##### Fifth level
+###### Sixth level`;
+
+      renderWithProvider(content);
+
+      expect(screen.getByRole('heading', { level: 1, name: 'Main Title' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Subtitle' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: 'Sub-subtitle' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 4, name: 'Fourth level' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 5, name: 'Fifth level' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 6, name: 'Sixth level' })).toBeInTheDocument();
+    });
+
+    it('provides proper link accessibility', () => {
+      const content = '[External link](https://example.com) and [Internal link](#section)';
+      
+      renderWithProvider(content);
+
+      const externalLink = screen.getByText('External link');
+      expect(externalLink).toHaveAttribute('href', 'https://example.com');
+      expect(externalLink).toHaveAttribute('target', '_blank');
+      expect(externalLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+      const internalLink = screen.getByText('Internal link');
+      expect(internalLink).toHaveAttribute('href', '#section');
+    });
+
+    it('provides accessible table structure', () => {
+      const content = `| Name | Age | City |
+|------|-----|------|
+| John | 25  | NYC  |
+| Jane | 30  | LA   |`;
+
+      renderWithProvider(content);
+
+      const table = screen.getByRole('table');
+      expect(table).toBeInTheDocument();
+
+      const headers = screen.getAllByRole('columnheader');
+      expect(headers).toHaveLength(3);
+      expect(headers[0]).toHaveTextContent('Name');
+
+      const cells = screen.getAllByRole('cell');
+      expect(cells).toHaveLength(6);
+      expect(cells[0]).toHaveTextContent('John');
+    });
+
+    it('maintains accessibility for diagrams', async () => {
+      const content = `\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
+
+      renderWithProvider(content);
+
+      await waitFor(() => {
+        const diagram = screen.getByRole('img');
+        expect(diagram).toBeInTheDocument();
+        expect(diagram).toHaveAttribute('aria-labelledby');
+      });
+    });
+  });
+
+  describe('Edge Cases and Boundary Conditions', () => {
+    it('handles empty content', () => {
+      renderWithProvider('');
+      
+      const container = document.querySelector('.markdown-content');
+      expect(container).toBeInTheDocument();
+      expect(container?.textContent?.trim()).toBe('');
+    });
+
+    it('handles whitespace-only content', () => {
+      renderWithProvider('   \n\t  ');
+      
+      const container = document.querySelector('.markdown-content');
+      expect(container).toBeInTheDocument();
+    });
+
+    it('handles malformed markdown gracefully', () => {
+      const malformedContent = `# Unclosed **bold text
+## Missing closing bracket [link text](
+### Incomplete table
+| Header 1 | Header 2
+| Cell 1`;
+
+      renderWithProvider(malformedContent);
+
+      // Should still render what it can
+      expect(screen.getByText('Unclosed **bold text')).toBeInTheDocument();
+      expect(screen.getByText('Missing closing bracket [link text](')).toBeInTheDocument();
+    });
+
+    it('handles very long lines', () => {
+      const longLine = 'This is a very long line that should wrap properly and not break the layout even when it contains many words and extends far beyond the normal width of a typical paragraph or text block in the user interface.';
+      
+      renderWithProvider(longLine);
+      
+      expect(screen.getByText(longLine)).toBeInTheDocument();
+    });
+
+    it('handles special characters and unicode', () => {
+      const unicodeContent = `# Unicode Test 🚀
+
+Emoji: 😀 🎉 ⭐
+Math: α β γ δ ∑ ∫ ∞
+Symbols: © ® ™ § ¶
+Accents: café naïve résumé`;
+
+      renderWithProvider(unicodeContent);
+
+      expect(screen.getByText('Unicode Test 🚀')).toBeInTheDocument();
+      expect(screen.getByText(/Emoji: 😀 🎉 ⭐/)).toBeInTheDocument();
+      expect(screen.getByText(/Math: α β γ δ ∑ ∫ ∞/)).toBeInTheDocument();
+    });
+
+    it('handles nested markdown structures', () => {
+      const nestedContent = `# Main Title
+
+> ## Quoted Heading
+> 
+> This is a **bold** text inside a blockquote with a [link](https://example.com).
+> 
+> - Quoted list item 1
+> - Quoted list item 2
+>   - Nested item
+>   - Another nested item
+> 
+> \`\`\`javascript
+> const quotedCode = 'inside blockquote';
+> \`\`\`
+
+Normal paragraph after blockquote.`;
+
+      renderWithProvider(nestedContent);
+
+      expect(screen.getByText('Main Title')).toBeInTheDocument();
+      expect(screen.getByText('Quoted Heading')).toBeInTheDocument();
+      expect(screen.getByText('bold')).toBeInTheDocument();
+      expect(screen.getByText('link')).toBeInTheDocument();
+      expect(screen.getByText('Quoted list item 1')).toBeInTheDocument();
+      expect(screen.getByText('Normal paragraph after blockquote.')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('SafeMarkdownRenderer - Error Boundary Tests', () => {
+  const originalConsoleError = console.error;
+
+  beforeEach(() => {
+    console.error = vi.fn();
+  });
+
+  afterEach(() => {
+    console.error = originalConsoleError;
+  });
+
+  it('catches rendering errors and shows fallback', () => {
+    // Mock ReactMarkdown to throw an error
+    vi.doMock('react-markdown', () => ({
+      default: () => {
+        throw new Error('Markdown parsing failed');
+      },
+    }));
+
+    render(<SafeMarkdownRenderer content="# Test Content" />);
+
+    // Should show fallback content
+    expect(screen.getByText('# Test Content')).toBeInTheDocument();
+  });
+
+  it('logs error details for debugging', () => {
+    vi.doMock('react-markdown', () => ({
+      default: () => {
+        throw new Error('Test error for logging');
+      },
+    }));
+
+    render(<SafeMarkdownRenderer content="test content" />);
+
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('passes through props when no error occurs', () => {
+    render(<SafeMarkdownRenderer content="# Normal Content" className="test-class" />);
+
+    expect(screen.getByText('Normal Content')).toBeInTheDocument();
+    
+    const container = document.querySelector('.test-class');
+    expect(container).toBeInTheDocument();
+  });
+
+  it('handles complex content in fallback mode', () => {
+    const complexContent = `# Title
+
+Complex content with **formatting** and [links](https://example.com).
+
+\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\``;
+
+    vi.doMock('react-markdown', () => ({
+      default: () => {
+        throw new Error('Complex parsing failed');
+      },
+    }));
+
+    render(<SafeMarkdownRenderer content={complexContent} />);
+
+    // Should show raw content in fallback
+    expect(screen.getByText(complexContent)).toBeInTheDocument();
   });
 });

@@ -85,7 +85,10 @@ describe('User Workflows E2E Tests', () => {
       // Mock window.location.href
       const originalLocation = window.location
       delete (window as any).location
-      window.location = { ...originalLocation, href: '' }
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, href: '' },
+        writable: true
+      })
       
       render(<App />, { wrapper: TestWrapper })
       
@@ -98,7 +101,10 @@ describe('User Workflows E2E Tests', () => {
       expect(window.location.href).toBe('/auth/strava')
       
       // Restore window.location
-      window.location = originalLocation
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true
+      })
     })
 
     it('should redirect authenticated users to chat interface', async () => {
@@ -391,7 +397,7 @@ describe('User Workflows E2E Tests', () => {
         mockEventSource = new MockEventSource(url, options)
         return mockEventSource
       })
-      global.EventSource = mockEventSourceConstructor
+      global.EventSource = mockEventSourceConstructor as any
 
       render(<App />, { wrapper: TestWrapper })
       

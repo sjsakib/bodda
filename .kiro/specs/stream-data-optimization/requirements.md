@@ -28,6 +28,19 @@ This feature addresses the challenge of handling large stream tool outputs that 
 3. WHEN derived features are calculated THEN the system SHALL provide a compressed sample of representative data points
 4. WHEN presenting derived features THEN the system SHALL include confidence levels and statistical significance where applicable
 
+### Requirement 2A
+
+**User Story:** As an LLM analyzing activity data, I want to receive lap-by-lap analysis of stream data using the activity's lap information, so that I can understand performance patterns and variations across different segments of the activity.
+
+#### Acceptance Criteria
+
+1. WHEN processing stream data with derived features THEN the system SHALL retrieve lap information from the activity detail API if available
+2. WHEN lap data is available THEN the system SHALL segment stream data according to lap boundaries using start_index and end_index
+3. WHEN presenting lap-by-lap analysis THEN the system SHALL provide statistical summaries for each lap including pace, heart rate, power, elevation, and other available metrics
+4. WHEN lap boundaries are used THEN the system SHALL calculate lap-specific derived features (min, max, average, trends) for each stream type
+5. WHEN no lap data is available THEN the system SHALL fallback to distance-based segmentation (per kilometer or mile)
+6. WHEN presenting lap analysis THEN the system SHALL include lap comparison metrics showing relative performance across laps
+
 ### Requirement 3
 
 **User Story:** As an LLM working with complex data streams, I want the system to summarize large datasets using a smaller AI model, so that I can quickly understand the key insights without processing the full stream.

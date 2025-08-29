@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Import Issue</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 4px; }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+        .error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+        .loading { background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>Debug React-Vega Import Issue</h1>
+    
+    <div id="results"></div>
+    
+    <script type="module">
+        const results = document.getElementById('results');
+        
+        function addResult(message, type = 'loading') {
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+        
+        async function testImports() {
+            addResult('Starting import tests...');
+            
+            try {
+                addResult('Testing vega import...');
+                const vega = await import('vega');
+                addResult('✓ Vega imported successfully', 'success');
+                console.log('Vega:', vega);
+            } catch (error) {
+                addResult(`✗ Vega import failed: ${error.message}`, 'error');
+                console.error('Vega error:', error);
+            }
+            
+            try {
+                addResult('Testing vega-lite import...');
+                const vegaLite = await import('vega-lite');
+                addResult('✓ Vega-Lite imported successfully', 'success');
+                console.log('Vega-Lite:', vegaLite);
+            } catch (error) {
+                addResult(`✗ Vega-Lite import failed: ${error.message}`, 'error');
+                console.error('Vega-Lite error:', error);
+            }
+            
+            try {
+                addResult('Testing react-vega import...');
+                const reactVega = await import('react-vega');
+                addResult('✓ React-Vega imported successfully', 'success');
+                console.log('React-Vega:', reactVega);
+                
+                if (reactVega.VegaLite) {
+                    addResult('✓ VegaLite component found in react-vega', 'success');
+                } else {
+                    addResult('✗ VegaLite component not found in react-vega', 'error');
+                }
+            } catch (error) {
+                addResult(`✗ React-Vega import failed: ${error.message}`, 'error');
+                console.error('React-Vega error:', error);
+            }
+            
+            try {
+                addResult('Testing combined import (like DiagramLibraryContext)...');
+                const [vegaLiteModule, reactVegaModule] = await Promise.all([
+                    import('vega-lite'),
+                    import('react-vega')
+                ]);
+                addResult('✓ Combined import successful', 'success');
+                console.log('Combined:', { vegaLiteModule, reactVegaModule });
+            } catch (error) {
+                addResult(`✗ Combined import failed: ${error.message}`, 'error');
+                console.error('Combined error:', error);
+            }
+            
+            addResult('Import tests completed.');
+        }
+        
+        testImports();
+    </script>
+</body>
+</html>

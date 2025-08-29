@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Vega Loading Issue</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .error { background: #fee; border-color: #fcc; color: #c00; }
+        .success { background: #efe; border-color: #cfc; color: #060; }
+        .loading { background: #fef; border-color: #fcf; color: #606; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Vega-Lite Loading Debug</h1>
+        
+        <div class="test-section">
+            <h2>Test 1: Direct Library Import</h2>
+            <div id="test1-result">Testing...</div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Test 2: React-Vega Import</h2>
+            <div id="test2-result">Testing...</div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Test 3: Vega-Lite Import</h2>
+            <div id="test3-result">Testing...</div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Test 4: Combined Import</h2>
+            <div id="test4-result">Testing...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Test 1: Direct library import
+        async function test1() {
+            try {
+                const vega = await import('vega');
+                document.getElementById('test1-result').innerHTML = '<span class="success">✓ Vega library loaded successfully</span>';
+                console.log('Vega loaded:', vega);
+            } catch (error) {
+                document.getElementById('test1-result').innerHTML = `<span class="error">✗ Failed to load Vega: ${error.message}</span>`;
+                console.error('Vega load error:', error);
+            }
+        }
+
+        // Test 2: React-Vega import
+        async function test2() {
+            try {
+                const reactVega = await import('react-vega');
+                document.getElementById('test2-result').innerHTML = '<span class="success">✓ React-Vega library loaded successfully</span>';
+                console.log('React-Vega loaded:', reactVega);
+            } catch (error) {
+                document.getElementById('test2-result').innerHTML = `<span class="error">✗ Failed to load React-Vega: ${error.message}</span>`;
+                console.error('React-Vega load error:', error);
+            }
+        }
+
+        // Test 3: Vega-Lite import
+        async function test3() {
+            try {
+                const vegaLite = await import('vega-lite');
+                document.getElementById('test3-result').innerHTML = '<span class="success">✓ Vega-Lite library loaded successfully</span>';
+                console.log('Vega-Lite loaded:', vegaLite);
+            } catch (error) {
+                document.getElementById('test3-result').innerHTML = `<span class="error">✗ Failed to load Vega-Lite: ${error.message}</span>`;
+                console.error('Vega-Lite load error:', error);
+            }
+        }
+
+        // Test 4: Combined import (simulating what the context does)
+        async function test4() {
+            try {
+                document.getElementById('test4-result').innerHTML = '<span class="loading">Loading libraries...</span>';
+                
+                const [vegaLite, reactVega] = await Promise.all([
+                    import('vega-lite'),
+                    import('react-vega')
+                ]);
+                
+                document.getElementById('test4-result').innerHTML = '<span class="success">✓ All libraries loaded successfully</span>';
+                console.log('All libraries loaded:', { vegaLite, reactVega });
+            } catch (error) {
+                document.getElementById('test4-result').innerHTML = `<span class="error">✗ Failed to load libraries: ${error.message}</span>`;
+                console.error('Combined load error:', error);
+            }
+        }
+
+        // Run all tests
+        test1();
+        test2();
+        test3();
+        test4();
+    </script>
+</body>
+</html>
