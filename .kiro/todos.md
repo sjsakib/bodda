@@ -1,39 +1,35 @@
 NOW
-
-- ~~Fix markdown formatting, headings are rending just like paragraph~~
-- Optimize stream tool
-  - Allow and instruct LLM to analyze large streams through pagination
-  - Summarize stream with faster models
-  - Calculate and provide derived features and provide sample points only
-- update tool output formats
-- Fix missing ftp, add more info into athlete profile
-- Tune system prompt
+- Strava Approval
+  - Brand guideline
+  - Link back to strava
+  - 
+  - Privacy policy?
 - deploy
 
 BEFORE SUBMISSION
 - Make a demo video
-- Use openAI responses API, possibly create an abstraction to use other LLMs including local models
 - MCP server
+- Use openAI responses API, possibly create an abstraction to use other LLMs including local models
+- Bring you own LLM
+- Fix session title
+- Update disclaimer
 
 
 NEXT PRIORITY
+- Prompting
+  - Link youtube search keyword for drills
+  - instruct to use nicer formatting
 - Tool usage messages should not be part of conversation context
-
-- Include zones, gears with profile
-- Include splits, similar activities with activity details
-
-- Mobile friendly
-  - hide sidebar and show menu icon
-  - text input placeholder cutting off
-- Show some suggestion pills when session is empty
+- Update landing page
+- similar activities with activity details
+- Update suggestions
 
 LOWER
 
 - Automatically start building logbook on login/connect
 - Bodda can be more clear about what tool it is using without bringing in jargons
-- Figure out a title for each session
 - Allow deleting session
-- Add T&C, privacy policy, update disclaimer
+- Add T&C, privacy policy
 - Bodda should reflect the tone of the athletes conversation like serious/casual/fun
 
 IDEAS
