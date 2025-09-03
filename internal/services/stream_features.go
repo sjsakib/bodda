@@ -123,7 +123,24 @@ func DetectInflectionPoints(data []float64, timeData []int, metric string, thres
 	}
 
 	var points []InflectionPoint
-	windowSize := 2 // Smaller window for more sensitivity
+	
+	// Adaptive window size based on data length
+	windowSize := 2
+	if len(data) > 50 {
+		windowSize = 3
+	}
+	if len(data) > 200 {
+		windowSize = 5
+	}
+
+	// Calculate data statistics for dynamic thresholding
+	stats := CalculateFloatStats(data)
+	dynamicThreshold := threshold
+	
+	// For larger datasets, use more stringent thresholds
+	if len(data) > 100 {
+		dynamicThreshold = math.Max(threshold, stats.StdDev*0.3)
+	}
 
 	for i := windowSize; i < len(data)-windowSize; i++ {
 		// Calculate slopes before and after current point
@@ -132,26 +149,31 @@ func DetectInflectionPoints(data []float64, timeData []int, metric string, thres
 
 		// Check for significant change in slope
 		slopeChange := math.Abs(afterSlope - beforeSlope)
-		if slopeChange > threshold {
+		if slopeChange > dynamicThreshold {
 			direction := "stable"
-			if beforeSlope < 0 && afterSlope > 0 {
+			
+			// Direction classification based on slope changes
+			if beforeSlope < -0.05 && afterSlope > 0.05 {
 				direction = "valley"
-			} else if beforeSlope > 0 && afterSlope < 0 {
+			} else if beforeSlope > 0.05 && afterSlope < -0.05 {
 				direction = "peak"
-			} else if afterSlope > beforeSlope {
+			} else if afterSlope > beforeSlope && slopeChange > dynamicThreshold {
 				direction = "increase"
-			} else {
+			} else if afterSlope < beforeSlope && slopeChange > dynamicThreshold {
 				direction = "decrease"
 			}
 
-			points = append(points, InflectionPoint{
-				Index:     i,
-				Time:      timeData[i],
-				Value:     data[i],
-				Metric:    metric,
-				Direction: direction,
-				Magnitude: slopeChange,
-			})
+			// Add inflection points (including stable ones for smaller datasets)
+			if direction != "stable" || len(data) < 50 {
+				points = append(points, InflectionPoint{
+					Index:     i,
+					Time:      timeData[i],
+					Value:     data[i],
+					Metric:    metric,
+					Direction: direction,
+					Magnitude: slopeChange,
+				})
+			}
 		}
 	}
 
@@ -164,29 +186,90 @@ func DetectSpikes(data []float64, timeData []int, metric string, stdDevThreshold
 		return []Spike{}
 	}
 
-	stats := CalculateFloatStats(data)
-	if stats.Count == 0 {
-		return []Spike{}
-	}
-
 	var spikes []Spike
+	
+	// Adaptive approach based on data size
+	if len(data) < 50 {
+		// For small datasets, use global statistics
+		stats := CalculateFloatStats(data)
+		if stats.Count == 0 || stats.StdDev == 0 {
+			return []Spike{}
+		}
 
-	for i := 0; i < len(data); i++ {
-		if math.Abs(data[i]-stats.Mean) > stdDevThreshold*stats.StdDev {
-			// Calculate spike duration
-			duration := 1
-			if i > 0 && i < len(timeData)-1 {
-				duration = timeData[i+1] - timeData[i-1]
+		for i := 0; i < len(data); i++ {
+			deviation := math.Abs(data[i] - stats.Mean)
+			magnitude := deviation / stats.StdDev
+
+			if magnitude > stdDevThreshold {
+				// Calculate spike duration
+				duration := 1
+				if i > 0 && i < len(timeData)-1 {
+					duration = timeData[i+1] - timeData[i-1]
+				}
+
+				spikes = append(spikes, Spike{
+					Index:     i,
+					Time:      timeData[i],
+					Value:     data[i],
+					Metric:    metric,
+					Magnitude: magnitude,
+					Duration:  duration,
+				})
+			}
+		}
+	} else {
+		// For larger datasets, use rolling statistics for better adaptation
+		windowSize := min(30, len(data)/4) // Adaptive window size
+
+		for i := windowSize; i < len(data)-windowSize; i++ {
+			// Calculate local statistics around the current point
+			localData := data[i-windowSize:i+windowSize+1]
+			localStats := CalculateFloatStats(localData)
+			
+			if localStats.Count == 0 || localStats.StdDev == 0 {
+				continue
 			}
 
-			spikes = append(spikes, Spike{
-				Index:     i,
-				Time:      timeData[i],
-				Value:     data[i],
-				Metric:    metric,
-				Magnitude: math.Abs(data[i]-stats.Mean) / stats.StdDev,
-				Duration:  duration,
-			})
+			deviation := math.Abs(data[i] - localStats.Mean)
+			magnitude := deviation / localStats.StdDev
+
+			if magnitude > stdDevThreshold {
+				// Calculate spike duration by looking at consecutive elevated values
+				duration := 1
+				startIdx := i
+				endIdx := i
+
+				// Look backwards for start of spike
+				for j := i - 1; j >= 0 && j >= i-5; j-- {
+					if math.Abs(data[j]-localStats.Mean)/localStats.StdDev > stdDevThreshold*0.7 {
+						startIdx = j
+					} else {
+						break
+					}
+				}
+
+				// Look forwards for end of spike
+				for j := i + 1; j < len(data) && j <= i+5; j++ {
+					if math.Abs(data[j]-localStats.Mean)/localStats.StdDev > stdDevThreshold*0.7 {
+						endIdx = j
+					} else {
+						break
+					}
+				}
+
+				if endIdx < len(timeData) && startIdx < len(timeData) {
+					duration = timeData[endIdx] - timeData[startIdx]
+				}
+
+				spikes = append(spikes, Spike{
+					Index:     i,
+					Time:      timeData[i],
+					Value:     data[i],
+					Metric:    metric,
+					Magnitude: magnitude,
+					Duration:  duration,
+				})
+			}
 		}
 	}
 
@@ -202,6 +285,37 @@ func AnalyzeTrends(data []float64, timeData []int, metric string, windowSize int
 	var trends []Trend
 	movingAvg := calculateMovingAverage(data, windowSize)
 
+	// Calculate dynamic thresholds based on data characteristics and size
+	stats := CalculateFloatStats(data)
+	var slopeThreshold float64
+	
+	// Adaptive thresholds based on data size and metric type
+	if len(data) < 50 {
+		// More lenient for small datasets
+		switch metric {
+		case "heart_rate", "heartrate":
+			slopeThreshold = 0.1
+		case "power":
+			slopeThreshold = 0.5
+		case "speed":
+			slopeThreshold = 0.05
+		default:
+			slopeThreshold = 0.1
+		}
+	} else {
+		// More stringent for larger datasets
+		switch metric {
+		case "heart_rate", "heartrate":
+			slopeThreshold = math.Max(0.5, stats.StdDev*0.1)
+		case "power":
+			slopeThreshold = math.Max(1.0, stats.StdDev*0.1)
+		case "speed":
+			slopeThreshold = math.Max(0.1, stats.StdDev*0.1)
+		default:
+			slopeThreshold = stats.StdDev * 0.1
+		}
+	}
+
 	// Find trend segments
 	currentTrend := &Trend{
 		StartIndex: windowSize,
@@ -213,9 +327,9 @@ func AnalyzeTrends(data []float64, timeData []int, metric string, windowSize int
 		slope := movingAvg[i+1] - movingAvg[i-1]
 		direction := "stable"
 		
-		if slope > 0.1 {
+		if slope > slopeThreshold {
 			direction = "increasing"
-		} else if slope < -0.1 {
+		} else if slope < -slopeThreshold {
 			direction = "decreasing"
 		}
 
@@ -233,7 +347,22 @@ func AnalyzeTrends(data []float64, timeData []int, metric string, windowSize int
 					data[currentTrend.StartIndex:currentTrend.EndIndex+1],
 				)
 
-				trends = append(trends, *currentTrend)
+				// Adaptive minimum requirements based on data size
+				minDuration := 10 // 10 seconds for small datasets
+				minConfidence := 0.3
+				
+				if len(data) > 100 {
+					minDuration = 30 // 30 seconds for larger datasets
+					minConfidence = 0.5
+				}
+
+				duration := currentTrend.EndTime - currentTrend.StartTime
+				if duration >= minDuration && currentTrend.Confidence >= minConfidence {
+					// For small datasets, include stable trends too
+					if currentTrend.Direction != "stable" || len(data) < 50 {
+						trends = append(trends, *currentTrend)
+					}
+				}
 			}
 
 			// Start new trend
@@ -582,4 +711,12 @@ func calculateCorrelation(x, y []float64) float64 {
 	}
 
 	return numerator / denominator
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

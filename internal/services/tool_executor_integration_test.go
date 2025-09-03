@@ -126,13 +126,19 @@ func TestToolExecutorIntegrationWithAIService(t *testing.T) {
 // Mock services for integration testing (with unique names to avoid conflicts)
 type mockStravaServiceForToolExecutor struct{}
 
-func (m *mockStravaServiceForToolExecutor) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
-	return &StravaAthlete{
-		ID:        12345,
-		Username:  "test-athlete",
-		Firstname: "Test",
-		Lastname:  "Athlete",
+func (m *mockStravaServiceForToolExecutor) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
+	return &StravaAthleteWithZones{
+		StravaAthlete: &StravaAthlete{
+			ID:        12345,
+			Username:  "test-athlete",
+			Firstname: "Test",
+			Lastname:  "Athlete",
+		},
 	}, nil
+}
+
+func (m *mockStravaServiceForToolExecutor) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
+	return &StravaAthleteZones{}, nil
 }
 
 func (m *mockStravaServiceForToolExecutor) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
@@ -155,10 +161,43 @@ func (m *mockStravaServiceForToolExecutor) GetActivityDetail(user *models.User, 
 	}, nil
 }
 
+func (m *mockStravaServiceForToolExecutor) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
+	return &StravaActivityDetailWithZones{
+		StravaActivityDetail: &StravaActivityDetail{
+			StravaActivity: StravaActivity{
+				ID:   activityID,
+				Name: "Test Activity Detail with Zones",
+				Type: "Run",
+			},
+		},
+		Zones: &StravaActivityZones{
+			HeartRate: &StravaZoneDistribution{
+				Type: "heartrate",
+				Zones: []StravaZoneData{
+					{Min: 0, Max: 150, Time: 1800},
+					{Min: 150, Max: 170, Time: 600},
+				},
+			},
+		},
+	}, nil
+}
+
 func (m *mockStravaServiceForToolExecutor) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
 	return &StravaStreams{
 		Time:      []int{0, 1, 2, 3, 4},
 		Heartrate: []int{120, 125, 130, 135, 140},
+	}, nil
+}
+
+func (m *mockStravaServiceForToolExecutor) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
+	return &StravaActivityZones{
+		HeartRate: &StravaZoneDistribution{
+			Type: "heartrate",
+			Zones: []StravaZoneData{
+				{Min: 0, Max: 150, Time: 1800},
+				{Min: 150, Max: 170, Time: 600},
+			},
+		},
 	}, nil
 }
 

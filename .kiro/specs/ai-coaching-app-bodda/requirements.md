@@ -61,6 +61,19 @@ Bodda is an AI-powered running and cycling coach application that integrates wit
 3. WHEN Strava data is requested THEN the system SHALL return relevant activity metrics, training history, and performance data
 4. IF Strava data is unavailable THEN the system SHALL handle the error gracefully and inform the user
 
+### Requirement 5A
+
+**User Story:** As an AI coach, I want access to the athlete's training zones (heart rate, power, pace) as part of their profile data, so that I can provide zone-based training recommendations and analyze their training intensity distribution.
+
+#### Acceptance Criteria
+
+1. WHEN the AI requests athlete profile data THEN the system SHALL include the athlete's current training zones (heart rate, power, pace zones) as part of the profile response
+2. WHEN training zones are available THEN the system SHALL provide zone boundaries, thresholds, and zone names integrated within the profile data for coaching analysis
+3. WHEN the AI requests activity details THEN the system SHALL include zone distribution data showing time spent in each training zone as part of the activity detail response
+4. WHEN activity details are requested THEN the system SHALL return detailed zone analysis including time in each zone and zone-based metrics integrated with other activity data
+5. IF training zones are not configured for an athlete THEN the system SHALL indicate zones are unavailable within the profile data and suggest zone testing
+6. WHEN zones are updated in Strava THEN the system SHALL reflect the current zone configuration in profile and activity data for coaching recommendations
+
 ### Requirement 6
 
 **User Story:** As an AI coach, I want to maintain and update an athlete logbook for each user, so that I can provide consistent and evolving coaching advice across all sessions.

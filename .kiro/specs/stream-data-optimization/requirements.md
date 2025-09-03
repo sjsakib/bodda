@@ -49,8 +49,9 @@ This feature addresses the challenge of handling large stream tool outputs that 
 
 1. WHEN the LLM selects AI summarization option THEN the system SHALL use a smaller, faster model for initial processing
 2. WHEN generating summaries THEN the main LLM SHALL provide the summarization prompt to ensure consistency with the current context
-3. WHEN AI summarization is complete THEN the system SHALL present key insights, patterns, and actionable information
-4. IF summarization fails THEN the system SHALL fallback to alternative processing methods
+3. WHEN preparing data for AI summarization THEN the system SHALL include the complete stream data, not just statistical summaries, to enable detailed analysis
+4. WHEN AI summarization is complete THEN the system SHALL present key insights, patterns, and actionable information
+5. IF summarization fails THEN the system SHALL fallback to alternative processing methods
 
 ### Requirement 4
 

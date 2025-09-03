@@ -24,21 +24,36 @@ func TestFormatAthleteProfile(t *testing.T) {
 	})
 
 	t.Run("complete profile", func(t *testing.T) {
-		profile := &StravaAthlete{
-			ID:        12345,
-			Username:  "testuser",
-			Firstname: "John",
-			Lastname:  "Doe",
-			City:      "San Francisco",
-			State:     "CA",
-			Country:   "USA",
-			Sex:       "M",
-			Premium:   true,
-			Summit:    false,
-			CreatedAt: "2020-01-15T10:30:00Z",
-			UpdatedAt: "2024-01-15T10:30:00Z",
-			Weight:    75.5,
-			FTP:       250,
+		profile := &StravaAthleteWithZones{
+			StravaAthlete: &StravaAthlete{
+				ID:        12345,
+				Username:  "testuser",
+				Firstname: "John",
+				Lastname:  "Doe",
+				City:      "San Francisco",
+				State:     "CA",
+				Country:   "USA",
+				Sex:       "M",
+				Premium:   true,
+				Summit:    false,
+				CreatedAt: "2020-01-15T10:30:00Z",
+				UpdatedAt: "2024-01-15T10:30:00Z",
+				Weight:    75.5,
+				FTP:       250,
+			},
+			Zones: &StravaAthleteZones{
+				HeartRate: &StravaZoneSet{
+					CustomZones: false,
+					Zones: []StravaZone{
+						{Min: 50, Max: 100},
+						{Min: 100, Max: 130},
+						{Min: 130, Max: 150},
+						{Min: 150, Max: 170},
+						{Min: 170, Max: 190},
+					},
+					ResourceState: 3,
+				},
+			},
 		}
 
 		result := formatter.FormatAthleteProfile(profile)
@@ -64,6 +79,37 @@ func TestFormatAthleteProfile(t *testing.T) {
 		}
 		if !strings.Contains(result, "Member since: January 15, 2020") {
 			t.Error("Missing or incorrect creation date")
+		}
+		if !strings.Contains(result, "🎯 **Training Zones:**") {
+			t.Error("Missing training zones section")
+		}
+		if !strings.Contains(result, "Zone 1: 50-100 bpm") {
+			t.Error("Missing or incorrect heart rate zone 1")
+		}
+		if !strings.Contains(result, "Zone 5: 170-190 bpm") {
+			t.Error("Missing or incorrect heart rate zone 5")
+		}
+	})
+
+	t.Run("profile without zones", func(t *testing.T) {
+		profile := &StravaAthleteWithZones{
+			StravaAthlete: &StravaAthlete{
+				ID:        12345,
+				Username:  "testuser",
+				Firstname: "John",
+				Lastname:  "Doe",
+				Premium:   true,
+			},
+			Zones: nil,
+		}
+
+		result := formatter.FormatAthleteProfile(profile)
+
+		if !strings.Contains(result, "👤 **John Doe** (@testuser)") {
+			t.Error("Missing or incorrect header")
+		}
+		if !strings.Contains(result, "🎯 **Training Zones:** Not available or not configured") {
+			t.Error("Missing or incorrect zones unavailable message")
 		}
 	})
 }

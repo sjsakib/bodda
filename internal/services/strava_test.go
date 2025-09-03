@@ -85,12 +85,34 @@ func TestStravaService_GetAthleteProfile(t *testing.T) {
 		FTP:       250,
 	}
 	
+	mockZones := []StravaZoneSet{
+		{
+			CustomZones: false,
+			Zones: []StravaZone{
+				{Min: 50, Max: 100},
+				{Min: 100, Max: 130},
+				{Min: 130, Max: 150},
+				{Min: 150, Max: 170},
+				{Min: 170, Max: 190},
+			},
+			ResourceState: 3,
+		},
+	}
+	
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/athlete", r.URL.Path)
-		assert.Equal(t, "Bearer test_token", r.Header.Get("Authorization"))
-		
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(mockAthlete)
+		
+		switch r.URL.Path {
+		case "/athlete":
+			assert.Equal(t, "Bearer test_token", r.Header.Get("Authorization"))
+			json.NewEncoder(w).Encode(mockAthlete)
+		case "/athlete/zones":
+			assert.Equal(t, "Bearer test_token", r.Header.Get("Authorization"))
+			json.NewEncoder(w).Encode(mockZones)
+		default:
+			t.Errorf("Unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 	
@@ -105,14 +127,25 @@ func TestStravaService_GetAthleteProfile(t *testing.T) {
 		TokenExpiry:  time.Now().Add(time.Hour),
 	}
 	
-	athlete, err := service.GetAthleteProfile(testUser)
+	athleteWithZones, err := service.GetAthleteProfile(testUser)
 	
 	require.NoError(t, err)
-	assert.Equal(t, mockAthlete.ID, athlete.ID)
-	assert.Equal(t, mockAthlete.Username, athlete.Username)
-	assert.Equal(t, mockAthlete.Firstname, athlete.Firstname)
-	assert.Equal(t, mockAthlete.Weight, athlete.Weight)
-	assert.Equal(t, mockAthlete.FTP, athlete.FTP)
+	require.NotNil(t, athleteWithZones)
+	require.NotNil(t, athleteWithZones.StravaAthlete)
+	
+	// Test athlete data
+	assert.Equal(t, mockAthlete.ID, athleteWithZones.StravaAthlete.ID)
+	assert.Equal(t, mockAthlete.Username, athleteWithZones.StravaAthlete.Username)
+	assert.Equal(t, mockAthlete.Firstname, athleteWithZones.StravaAthlete.Firstname)
+	assert.Equal(t, mockAthlete.Weight, athleteWithZones.StravaAthlete.Weight)
+	assert.Equal(t, mockAthlete.FTP, athleteWithZones.StravaAthlete.FTP)
+	
+	// Test zones data
+	require.NotNil(t, athleteWithZones.Zones)
+	require.NotNil(t, athleteWithZones.Zones.HeartRate)
+	assert.Equal(t, 5, len(athleteWithZones.Zones.HeartRate.Zones))
+	assert.Equal(t, 50, athleteWithZones.Zones.HeartRate.Zones[0].Min)
+	assert.Equal(t, 100, athleteWithZones.Zones.HeartRate.Zones[0].Max)
 }
 
 func TestStravaService_GetActivities(t *testing.T) {

@@ -8,52 +8,52 @@ import (
 
 // DerivedFeatures represents comprehensive stream analysis data
 type DerivedFeatures struct {
-	ActivityID      int64                  `json:"activity_id"`
-	Summary         FeatureSummary         `json:"summary"`
-	InflectionPoints []InflectionPoint     `json:"inflection_points"`
-	Statistics      StreamStatistics       `json:"statistics"`
-	Trends          []Trend               `json:"trends"`
-	Spikes          []Spike               `json:"spikes"`
-	SampleData      []DataPoint           `json:"sample_data"`
-	LapAnalysis     *LapAnalysis          `json:"lap_analysis,omitempty"`
+	ActivityID       int64             `json:"activity_id"`
+	Summary          FeatureSummary    `json:"summary"`
+	InflectionPoints []InflectionPoint `json:"inflection_points"`
+	Statistics       StreamStatistics  `json:"statistics"`
+	Trends           []Trend           `json:"trends"`
+	Spikes           []Spike           `json:"spikes"`
+	SampleData       []DataPoint       `json:"sample_data"`
+	LapAnalysis      *LapAnalysis      `json:"lap_analysis,omitempty"`
 }
 
 // FeatureSummary contains high-level activity metrics
 type FeatureSummary struct {
-	TotalDataPoints   int     `json:"total_data_points"`
-	Duration          int     `json:"duration_seconds"`
-	TotalDistance     float64 `json:"total_distance,omitempty"`
-	ElevationGain     float64 `json:"elevation_gain,omitempty"`
-	ElevationLoss     float64 `json:"elevation_loss,omitempty"`
-	AvgSpeed          float64 `json:"avg_speed,omitempty"`
-	MaxSpeed          float64 `json:"max_speed,omitempty"`
-	AvgHeartRate      float64 `json:"avg_heart_rate,omitempty"`
-	MaxHeartRate      int     `json:"max_heart_rate,omitempty"`
-	AvgPower          float64 `json:"avg_power,omitempty"`
-	MaxPower          int     `json:"max_power,omitempty"`
-	NormalizedPower   float64 `json:"normalized_power,omitempty"`
-	IntensityFactor   float64 `json:"intensity_factor,omitempty"`
-	TrainingStressScore float64 `json:"training_stress_score,omitempty"`
-	HeartRateDrift    float64 `json:"heart_rate_drift,omitempty"` // bpm per hour
-	AvgCadence        float64 `json:"avg_cadence,omitempty"`
-	MaxCadence        int     `json:"max_cadence,omitempty"`
-	AvgTemperature    float64 `json:"avg_temperature,omitempty"`
-	MovingTimePercent float64 `json:"moving_time_percent,omitempty"`
-	StreamTypes       []string `json:"stream_types"`
+	TotalDataPoints     int      `json:"total_data_points"`
+	Duration            int      `json:"duration_seconds"`
+	TotalDistance       float64  `json:"total_distance,omitempty"`
+	ElevationGain       float64  `json:"elevation_gain,omitempty"`
+	ElevationLoss       float64  `json:"elevation_loss,omitempty"`
+	AvgSpeed            float64  `json:"avg_speed,omitempty"`
+	MaxSpeed            float64  `json:"max_speed,omitempty"`
+	AvgHeartRate        float64  `json:"avg_heart_rate,omitempty"`
+	MaxHeartRate        int      `json:"max_heart_rate,omitempty"`
+	AvgPower            float64  `json:"avg_power,omitempty"`
+	MaxPower            int      `json:"max_power,omitempty"`
+	NormalizedPower     float64  `json:"normalized_power,omitempty"`
+	IntensityFactor     float64  `json:"intensity_factor,omitempty"`
+	TrainingStressScore float64  `json:"training_stress_score,omitempty"`
+	HeartRateDrift      float64  `json:"heart_rate_drift,omitempty"` // bpm per hour
+	AvgCadence          float64  `json:"avg_cadence,omitempty"`
+	MaxCadence          int      `json:"max_cadence,omitempty"`
+	AvgTemperature      float64  `json:"avg_temperature,omitempty"`
+	MovingTimePercent   float64  `json:"moving_time_percent,omitempty"`
+	StreamTypes         []string `json:"stream_types"`
 }
 
 // StreamStatistics contains statistical analysis for all stream types
 type StreamStatistics struct {
-	Time           *MetricStats `json:"time,omitempty"`
-	Distance       *MetricStats `json:"distance,omitempty"`
-	Altitude       *MetricStats `json:"altitude,omitempty"`
-	VelocitySmooth *MetricStats `json:"velocity_smooth,omitempty"`
-	HeartRate      *MetricStats `json:"heart_rate,omitempty"`
-	Cadence        *MetricStats `json:"cadence,omitempty"`
-	Power          *MetricStats `json:"power,omitempty"`
-	Temperature    *MetricStats `json:"temperature,omitempty"`
-	Grade          *MetricStats `json:"grade_smooth,omitempty"`
-	Moving         *BooleanStats `json:"moving,omitempty"`
+	Time           *MetricStats   `json:"time,omitempty"`
+	Distance       *MetricStats   `json:"distance,omitempty"`
+	Altitude       *MetricStats   `json:"altitude,omitempty"`
+	VelocitySmooth *MetricStats   `json:"velocity_smooth,omitempty"`
+	HeartRate      *MetricStats   `json:"heart_rate,omitempty"`
+	Cadence        *MetricStats   `json:"cadence,omitempty"`
+	Power          *MetricStats   `json:"power,omitempty"`
+	Temperature    *MetricStats   `json:"temperature,omitempty"`
+	Grade          *MetricStats   `json:"grade_smooth,omitempty"`
+	Moving         *BooleanStats  `json:"moving,omitempty"`
 	LatLng         *LocationStats `json:"latlng,omitempty"`
 }
 
@@ -65,9 +65,11 @@ type DataPoint struct {
 
 // OutputFormatter interface defines methods for formatting Strava tool outputs
 type OutputFormatter interface {
-	FormatAthleteProfile(profile *StravaAthlete) string
+	FormatAthleteProfile(profile *StravaAthleteWithZones) string
 	FormatActivities(activities []*StravaActivity) string
 	FormatActivityDetails(details *StravaActivityDetail) string
+	FormatActivityDetailsWithZones(detailsWithZones *StravaActivityDetailWithZones) string
+	FormatActivityZones(zones *StravaActivityZones) string
 	FormatStreamData(streams *StravaStreams, mode string) string
 	FormatDerivedFeatures(features interface{}) string
 	FormatStreamSummary(summary interface{}) string
@@ -83,32 +85,33 @@ func NewOutputFormatter() OutputFormatter {
 }
 
 // FormatAthleteProfile formats athlete profile data with emojis and readable markdown structure
-func (f *outputFormatter) FormatAthleteProfile(profile *StravaAthlete) string {
-	if profile == nil {
+func (f *outputFormatter) FormatAthleteProfile(profile *StravaAthleteWithZones) string {
+	if profile == nil || profile.StravaAthlete == nil {
 		return "❌ **No athlete profile data available**"
 	}
 
+	athlete := profile.StravaAthlete
 	var builder strings.Builder
-	
+
 	// Header with athlete name and basic info
-	builder.WriteString(fmt.Sprintf("👤 **%s %s**", profile.Firstname, profile.Lastname))
-	if profile.Username != "" {
-		builder.WriteString(fmt.Sprintf(" (@%s)", profile.Username))
+	builder.WriteString(fmt.Sprintf("👤 **%s %s**", athlete.Firstname, athlete.Lastname))
+	if athlete.Username != "" {
+		builder.WriteString(fmt.Sprintf(" (@%s)", athlete.Username))
 	}
 	builder.WriteString("\n\n")
 
 	// Location information
-	if profile.City != "" || profile.State != "" || profile.Country != "" {
+	if athlete.City != "" || athlete.State != "" || athlete.Country != "" {
 		builder.WriteString("📍 **Location:** ")
 		locationParts := []string{}
-		if profile.City != "" {
-			locationParts = append(locationParts, profile.City)
+		if athlete.City != "" {
+			locationParts = append(locationParts, athlete.City)
 		}
-		if profile.State != "" {
-			locationParts = append(locationParts, profile.State)
+		if athlete.State != "" {
+			locationParts = append(locationParts, athlete.State)
 		}
-		if profile.Country != "" {
-			locationParts = append(locationParts, profile.Country)
+		if athlete.Country != "" {
+			locationParts = append(locationParts, athlete.Country)
 		}
 		builder.WriteString(strings.Join(locationParts, ", "))
 		builder.WriteString("\n")
@@ -116,45 +119,120 @@ func (f *outputFormatter) FormatAthleteProfile(profile *StravaAthlete) string {
 
 	// Account details
 	builder.WriteString("⚙️ **Account Details:**\n")
-	if profile.Sex != "" {
-		builder.WriteString(fmt.Sprintf("- Gender: %s\n", profile.Sex))
+	if athlete.Sex != "" {
+		builder.WriteString(fmt.Sprintf("- Gender: %s\n", athlete.Sex))
 	}
-	if profile.Premium {
+	if athlete.Premium {
 		builder.WriteString("- Premium: ✅ Yes\n")
 	} else {
 		builder.WriteString("- Premium: ❌ No\n")
 	}
-	if profile.Summit {
+	if athlete.Summit {
 		builder.WriteString("- Summit: ✅ Yes\n")
 	} else {
 		builder.WriteString("- Summit: ❌ No\n")
 	}
 
 	// Performance metrics
-	if profile.Weight > 0 || profile.FTP > 0 {
+	if athlete.Weight > 0 || athlete.FTP > 0 {
 		builder.WriteString("\n📊 **Performance Metrics:**\n")
-		if profile.Weight > 0 {
-			builder.WriteString(fmt.Sprintf("- Weight: %.1f kg\n", profile.Weight))
+		if athlete.Weight > 0 {
+			builder.WriteString(fmt.Sprintf("- Weight: %.1f kg\n", athlete.Weight))
 		}
-		if profile.FTP > 0 {
-			builder.WriteString(fmt.Sprintf("- FTP: %d watts\n", profile.FTP))
+		if athlete.FTP > 0 {
+			builder.WriteString(fmt.Sprintf("- FTP: %d watts\n", athlete.FTP))
 		}
 	}
 
+	// Training zones information
+	if profile.Zones != nil {
+		builder.WriteString("\n🎯 **Training Zones:**\n")
+
+		if profile.Zones.HeartRate != nil && len(profile.Zones.HeartRate.Zones) > 0 {
+			builder.WriteString("- **Heart Rate Zones:**\n")
+			zoneNum := 1
+			for _, zone := range profile.Zones.HeartRate.Zones {
+				// Skip zones with -1 min values (invalid zones)
+				if zone.Min == -1 {
+					continue
+				}
+				// Format zone range, using "+" for zones with -1 max (no upper limit)
+				if zone.Max == -1 {
+					builder.WriteString(fmt.Sprintf("  - Zone %d: %d+ bpm\n", zoneNum, zone.Min))
+				} else {
+					builder.WriteString(fmt.Sprintf("  - Zone %d: %d-%d bpm\n", zoneNum, zone.Min, zone.Max))
+				}
+				zoneNum++
+			}
+		}
+
+		if profile.Zones.Power != nil && len(profile.Zones.Power.Zones) > 0 {
+			builder.WriteString("- **Power Zones:**\n")
+			zoneNum := 1
+			for _, zone := range profile.Zones.Power.Zones {
+				// Skip zones with -1 min values (invalid zones)
+				if zone.Min == -1 {
+					continue
+				}
+				// Format zone range, using "+" for zones with -1 max (no upper limit)
+				if zone.Max == -1 {
+					builder.WriteString(fmt.Sprintf("  - Zone %d: %d+ watts\n", zoneNum, zone.Min))
+				} else {
+					builder.WriteString(fmt.Sprintf("  - Zone %d: %d-%d watts\n", zoneNum, zone.Min, zone.Max))
+				}
+				zoneNum++
+			}
+		}
+
+		if profile.Zones.Pace != nil && len(profile.Zones.Pace.Zones) > 0 {
+			builder.WriteString("- **Pace Zones:**\n")
+			zoneNum := 1
+			for _, zone := range profile.Zones.Pace.Zones {
+				// Skip zones with -1 min values (invalid zones)
+				if zone.Min == -1 {
+					continue
+				}
+				// Convert seconds to pace format (mm:ss per km/mile)
+				minPace := formatPace(zone.Min)
+				// Format zone range, using "+" for zones with -1 max (no upper limit)
+				if zone.Max == -1 {
+					builder.WriteString(fmt.Sprintf("  - Zone %d: %s+ per km\n", zoneNum, minPace))
+				} else {
+					maxPace := formatPace(zone.Max)
+					builder.WriteString(fmt.Sprintf("  - Zone %d: %s-%s per km\n", zoneNum, maxPace, minPace))
+				}
+				zoneNum++
+			}
+		}
+
+		if profile.Zones.HeartRate == nil && profile.Zones.Power == nil && profile.Zones.Pace == nil {
+			builder.WriteString("- No training zones configured\n")
+		}
+	} else {
+		builder.WriteString("\n🎯 **Training Zones:** Not available or not configured\n")
+	}
+
 	// Account dates
-	if profile.CreatedAt != "" {
+	if athlete.CreatedAt != "" {
 		builder.WriteString("\n📅 **Account Information:**\n")
-		if createdTime, err := time.Parse(time.RFC3339, profile.CreatedAt); err == nil {
+		if createdTime, err := time.Parse(time.RFC3339, athlete.CreatedAt); err == nil {
 			builder.WriteString(fmt.Sprintf("- Member since: %s\n", createdTime.Format("January 2, 2006")))
 		}
-		if profile.UpdatedAt != "" {
-			if updatedTime, err := time.Parse(time.RFC3339, profile.UpdatedAt); err == nil {
+		if athlete.UpdatedAt != "" {
+			if updatedTime, err := time.Parse(time.RFC3339, athlete.UpdatedAt); err == nil {
 				builder.WriteString(fmt.Sprintf("- Last updated: %s\n", updatedTime.Format("January 2, 2006")))
 			}
 		}
 	}
 
 	return builder.String()
+}
+
+// formatPace converts seconds per km to mm:ss format
+func formatPace(seconds int) string {
+	minutes := seconds / 60
+	secs := seconds % 60
+	return fmt.Sprintf("%d:%02d", minutes, secs)
 }
 
 // FormatActivities formats activity lists with concise summary format in markdown
@@ -169,7 +247,7 @@ func (f *outputFormatter) FormatActivities(activities []*StravaActivity) string 
 	for _, activity := range activities {
 		// Activity type emoji
 		emoji := f.getActivityEmoji(activity.Type, activity.SportType)
-		
+
 		// Parse date
 		var dateStr string
 		if startTime, err := time.Parse(time.RFC3339, activity.StartDateLocal); err == nil {
@@ -180,9 +258,9 @@ func (f *outputFormatter) FormatActivities(activities []*StravaActivity) string 
 
 		// Format distance
 		distanceStr := f.formatDistance(activity.Distance)
-		
+
 		// Build activity line
-		builder.WriteString(fmt.Sprintf("%s **%s** (ID: %d) — %s on %s\n", 
+		builder.WriteString(fmt.Sprintf("%s **%s** (ID: %d) — %s on %s\n",
 			emoji, activity.Name, activity.ID, distanceStr, dateStr))
 	}
 
@@ -196,7 +274,7 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 	}
 
 	var builder strings.Builder
-	
+
 	// Header with activity name and type
 	emoji := f.getActivityEmoji(details.Type, details.SportType)
 	builder.WriteString(fmt.Sprintf("%s **%s** (ID: %d)\n", emoji, details.Name, details.ID))
@@ -211,6 +289,31 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 	// Date and time
 	if startTime, err := time.Parse(time.RFC3339, details.StartDateLocal); err == nil {
 		builder.WriteString(fmt.Sprintf("- Date: %s\n", startTime.Format("1/2/2006, 3:04:05 PM")))
+	}
+
+	// Location information
+	if details.LocationCity != "" || details.LocationState != "" || details.LocationCountry != "" {
+		builder.WriteString("- Location: ")
+		locationParts := []string{}
+		if details.LocationCity != "" {
+			locationParts = append(locationParts, details.LocationCity)
+		}
+		if details.LocationState != "" {
+			locationParts = append(locationParts, details.LocationState)
+		}
+		if details.LocationCountry != "" {
+			locationParts = append(locationParts, details.LocationCountry)
+		}
+		builder.WriteString(strings.Join(locationParts, ", "))
+		builder.WriteString("\n")
+	}
+
+	// Start/End coordinates
+	if len(details.StartLatlng) == 2 {
+		builder.WriteString(fmt.Sprintf("- Start Coordinates: %.6f, %.6f\n", details.StartLatlng[0], details.StartLatlng[1]))
+	}
+	if len(details.EndLatlng) == 2 {
+		builder.WriteString(fmt.Sprintf("- End Coordinates: %.6f, %.6f\n", details.EndLatlng[0], details.EndLatlng[1]))
 	}
 
 	// Duration information
@@ -251,18 +354,20 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 		builder.WriteString("\n")
 	}
 
-	// Cadence metrics
-	if details.AveragePower > 0 || details.MaxPower > 0 {
+	// Power metrics
+	if details.AveragePower > 0 || details.MaxPower > 0 || details.WeightedAverageWatts > 0 {
 		builder.WriteString("- ")
+		powerParts := []string{}
 		if details.AveragePower > 0 {
-			builder.WriteString(fmt.Sprintf("Avg Power: %.1fW", details.AveragePower))
+			powerParts = append(powerParts, fmt.Sprintf("Avg Power: %.1fW", details.AveragePower))
 		}
 		if details.MaxPower > 0 {
-			if details.AveragePower > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString(fmt.Sprintf("Max Power: %.0fW", details.MaxPower))
+			powerParts = append(powerParts, fmt.Sprintf("Max Power: %.0fW", details.MaxPower))
 		}
+		if details.WeightedAverageWatts > 0 {
+			powerParts = append(powerParts, fmt.Sprintf("Weighted Avg: %.1fW", details.WeightedAverageWatts))
+		}
+		builder.WriteString(strings.Join(powerParts, ", "))
 		builder.WriteString("\n")
 	}
 
@@ -281,12 +386,46 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 		builder.WriteString("\n")
 	}
 
+	// Cadence metrics
+	if details.AverageCadence > 0 {
+		builder.WriteString(fmt.Sprintf("- Average Cadence: %.1f rpm\n", details.AverageCadence))
+	}
+
 	// Energy and temperature
 	if details.Calories > 0 {
 		builder.WriteString(fmt.Sprintf("- Calories: %.0f\n", details.Calories))
 	}
+	if details.Kilojoules > 0 {
+		builder.WriteString(fmt.Sprintf("- Energy: %.0f kJ\n", details.Kilojoules))
+	}
 	if details.AverageTemp > 0 {
 		builder.WriteString(fmt.Sprintf("- Average Temperature: %.1f°C\n", details.AverageTemp))
+	}
+
+	// Strava-specific metrics
+	if details.SufferScore > 0 {
+		builder.WriteString(fmt.Sprintf("- Suffer Score: %.0f\n", details.SufferScore))
+	}
+	if details.PerceivedExertion > 0 {
+		builder.WriteString(fmt.Sprintf("- Perceived Exertion: %d/10", details.PerceivedExertion))
+		if details.PreferPerceivedExertion {
+			builder.WriteString(" (Preferred)")
+		}
+		builder.WriteString("\n")
+	}
+
+	// Device and upload information
+	if details.DeviceName != "" {
+		builder.WriteString(fmt.Sprintf("- Device: %s\n", details.DeviceName))
+	}
+	if details.DeviceWatts {
+		builder.WriteString("- Power Source: Device/Sensor\n")
+	}
+	if details.UploadID > 0 {
+		builder.WriteString(fmt.Sprintf("- Upload ID: %d\n", details.UploadID))
+	}
+	if details.ExternalID != "" {
+		builder.WriteString(fmt.Sprintf("- External ID: %s\n", details.ExternalID))
 	}
 
 	// Gear information
@@ -308,11 +447,15 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 		builder.WriteString("\n")
 	}
 
-	// Social metrics
-	if details.KudosCount > 0 || details.CommentCount > 0 || details.PRCount > 0 {
+	// Social metrics and achievements
+	if details.KudosCount > 0 || details.CommentCount > 0 || details.PRCount > 0 || details.AchievementCount > 0 || details.TotalPhotoCount > 0 {
 		builder.WriteString("\n🎯 **Social & Achievements:**\n")
 		if details.KudosCount > 0 {
-			builder.WriteString(fmt.Sprintf("- Kudos: %d\n", details.KudosCount))
+			builder.WriteString(fmt.Sprintf("- Kudos: %d", details.KudosCount))
+			if details.HasKudoed {
+				builder.WriteString(" (You gave kudos)")
+			}
+			builder.WriteString("\n")
 		}
 		if details.CommentCount > 0 {
 			builder.WriteString(fmt.Sprintf("- Comments: %d\n", details.CommentCount))
@@ -320,9 +463,130 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 		if details.PRCount > 0 {
 			builder.WriteString(fmt.Sprintf("- Personal Records: %d\n", details.PRCount))
 		}
+		if details.AchievementCount > 0 {
+			builder.WriteString(fmt.Sprintf("- Achievements: %d\n", details.AchievementCount))
+		}
+		if details.TotalPhotoCount > 0 {
+			builder.WriteString(fmt.Sprintf("- Photos: %d\n", details.TotalPhotoCount))
+		}
 	}
 
-	// Activity flags
+	// Best efforts section
+	if len(details.BestEfforts) > 0 {
+		builder.WriteString("\n🏆 **Best Efforts:**\n")
+		for _, effort := range details.BestEfforts {
+			builder.WriteString(fmt.Sprintf("- **%s:** %s", effort.Name, f.formatDuration(effort.ElapsedTime)))
+			if effort.Distance > 0 {
+				builder.WriteString(fmt.Sprintf(" (%s)", f.formatDistance(effort.Distance)))
+			}
+			if effort.PRRank > 0 {
+				builder.WriteString(fmt.Sprintf(" (PR #%d)", effort.PRRank))
+			}
+			if effort.AverageHeartrate > 0 {
+				builder.WriteString(fmt.Sprintf(" | HR: %.0f bpm", effort.AverageHeartrate))
+			}
+			if effort.AveragePower > 0 {
+				builder.WriteString(fmt.Sprintf(" | Power: %.0fW", effort.AveragePower))
+			}
+			if effort.AverageCadence > 0 {
+				builder.WriteString(fmt.Sprintf(" | Cadence: %.0f rpm", effort.AverageCadence))
+			}
+			if len(effort.Achievements) > 0 {
+				builder.WriteString(fmt.Sprintf(" | Achievements: %d", len(effort.Achievements)))
+			}
+			builder.WriteString("\n")
+		}
+	}
+
+	// Standard splits section
+	if len(details.SplitsStandard) > 0 {
+		builder.WriteString("\n📏 **Standard Splits:**\n")
+		for i, split := range details.SplitsStandard {
+			if i >= 5 { // Limit to first 5 splits for readability
+				builder.WriteString(fmt.Sprintf("- ... and %d more splits\n", len(details.SplitsStandard)-5))
+				break
+			}
+			builder.WriteString(fmt.Sprintf("- **Split %d:** %s", split.Split, f.formatDuration(split.ElapsedTime)))
+			if split.Distance > 0 {
+				builder.WriteString(fmt.Sprintf(" | %s", f.formatDistance(split.Distance)))
+			}
+			if split.AverageSpeed > 0 {
+				builder.WriteString(fmt.Sprintf(" | %s", f.formatSpeed(split.AverageSpeed)))
+			}
+			if split.AverageGradeAdjustedSpeed > 0 && split.AverageGradeAdjustedSpeed != split.AverageSpeed {
+				builder.WriteString(fmt.Sprintf(" | GAP: %s", f.formatSpeed(split.AverageGradeAdjustedSpeed)))
+			}
+			if split.AverageHeartrate > 0 {
+				builder.WriteString(fmt.Sprintf(" | HR: %.0f bpm", split.AverageHeartrate))
+			}
+			if split.AveragePower > 0 {
+				builder.WriteString(fmt.Sprintf(" | Power: %.0fW", split.AveragePower))
+			}
+			if split.AverageCadence > 0 {
+				builder.WriteString(fmt.Sprintf(" | Cadence: %.0f rpm", split.AverageCadence))
+			}
+			if split.ElevationDifference != 0 {
+				builder.WriteString(fmt.Sprintf(" | Elev: %+.0fm", split.ElevationDifference))
+			}
+			if split.PaceZone > 0 {
+				builder.WriteString(fmt.Sprintf(" | Zone: %d", split.PaceZone))
+			}
+			builder.WriteString("\n")
+		}
+	}
+
+	// Laps section
+	if len(details.Laps) > 0 {
+		builder.WriteString("\n🔄 **Laps:**\n")
+		for i, lap := range details.Laps {
+			if i >= 5 { // Limit to first 5 laps for readability
+				builder.WriteString(fmt.Sprintf("- ... and %d more laps\n", len(details.Laps)-5))
+				break
+			}
+			builder.WriteString(fmt.Sprintf("- **Lap %d:** %s", lap.LapIndex, f.formatDuration(lap.ElapsedTime)))
+			if lap.Distance > 0 {
+				builder.WriteString(fmt.Sprintf(" (%s)", f.formatDistance(lap.Distance)))
+			}
+			if lap.AverageSpeed > 0 {
+				builder.WriteString(fmt.Sprintf(" | %s", f.formatSpeed(lap.AverageSpeed)))
+			}
+			if lap.AverageHeartrate > 0 {
+				builder.WriteString(fmt.Sprintf(" | HR: %.0f bpm", lap.AverageHeartrate))
+			}
+			if lap.AveragePower > 0 {
+				builder.WriteString(fmt.Sprintf(" | Power: %.0fW", lap.AveragePower))
+			}
+			if lap.AverageCadence > 0 {
+				builder.WriteString(fmt.Sprintf(" | Cadence: %.0f rpm", lap.AverageCadence))
+			}
+			if lap.TotalElevationGain > 0 {
+				builder.WriteString(fmt.Sprintf(" | Elev: +%.0fm", lap.TotalElevationGain))
+			}
+			builder.WriteString("\n")
+		}
+	}
+
+	// Similar activities comparison
+	if details.SimilarActivities.EffortCount > 0 {
+		builder.WriteString("\n📊 **Performance Comparison:**\n")
+		builder.WriteString(fmt.Sprintf("- Similar Activities: %d efforts\n", details.SimilarActivities.EffortCount))
+		if details.SimilarActivities.PRRank > 0 {
+			builder.WriteString(fmt.Sprintf("- Performance Rank: #%d\n", details.SimilarActivities.PRRank))
+		}
+		if details.SimilarActivities.AverageSpeed > 0 {
+			builder.WriteString(fmt.Sprintf("- Average Speed vs Similar: %s\n", f.formatSpeed(details.SimilarActivities.AverageSpeed)))
+		}
+		if details.SimilarActivities.FrequencyMilestone != "" {
+			builder.WriteString(fmt.Sprintf("- Milestone: %s\n", details.SimilarActivities.FrequencyMilestone))
+		}
+	}
+
+	// Available training zones
+	if len(details.AvailableZones) > 0 {
+		builder.WriteString(fmt.Sprintf("\n📈 **Available Training Zones:** %s\n", strings.Join(details.AvailableZones, ", ")))
+	}
+
+	// Activity flags and privacy settings
 	flags := []string{}
 	if details.Trainer {
 		flags = append(flags, "Indoor/Trainer")
@@ -336,6 +600,15 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 	if details.Private {
 		flags = append(flags, "Private")
 	}
+	if details.HideFromHome {
+		flags = append(flags, "Hidden from Home Feed")
+	}
+	if details.HeartrateOptOut {
+		flags = append(flags, "Heart Rate Opt-out")
+	}
+	if details.FromAcceptedTag {
+		flags = append(flags, "From Accepted Tag")
+	}
 	if len(flags) > 0 {
 		builder.WriteString(fmt.Sprintf("\n🏷️ **Activity Flags:** %s\n", strings.Join(flags, ", ")))
 	}
@@ -348,6 +621,129 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 	return builder.String()
 }
 
+// FormatActivityDetailsWithZones formats activity details integrated with zone distribution data
+func (f *outputFormatter) FormatActivityDetailsWithZones(detailsWithZones *StravaActivityDetailWithZones) string {
+	if detailsWithZones == nil {
+		return "❌ **No activity details available**"
+	}
+
+	var builder strings.Builder
+
+	// Format the main activity details first
+	builder.WriteString(f.FormatActivityDetails(detailsWithZones.StravaActivityDetail))
+
+	// Add zone distribution data if available
+	if detailsWithZones.Zones != nil {
+		builder.WriteString("\n")
+		builder.WriteString(f.FormatActivityZones(detailsWithZones.Zones))
+	}
+
+	return builder.String()
+}
+
+// FormatActivityZones formats training zone data with time spent in each zone
+func (f *outputFormatter) FormatActivityZones(zones *StravaActivityZones) string {
+	if zones == nil {
+		return "❌ **No training zone data available**"
+	}
+
+	var builder strings.Builder
+	builder.WriteString("📈 **Training Zone Analysis**\n\n")
+
+	// Heart Rate Zones
+	if zones.HeartRate != nil && len(zones.HeartRate.Zones) > 0 {
+		builder.WriteString("💓 **Heart Rate Zones:**\n")
+		totalTime := 0.0
+		for _, zone := range zones.HeartRate.Zones {
+			totalTime += zone.Time
+		}
+
+		zoneNum := 1
+		for _, zone := range zones.HeartRate.Zones {
+			// Skip zones with -1 min values (invalid zones)
+			if zone.Min == -1 {
+				continue
+			}
+			percentage := zone.Time / totalTime * 100
+			// Format zone range, using "+" for zones with -1 max (no upper limit)
+			if zone.Max == -1 {
+				builder.WriteString(fmt.Sprintf("- **Zone %d** (%.0f+ bpm): %s (%.1f%%)\n",
+					zoneNum, zone.Min, f.formatDuration(int(zone.Time)), percentage))
+			} else {
+				builder.WriteString(fmt.Sprintf("- **Zone %d** (%.0f-%.0f bpm): %s (%.1f%%)\n",
+					zoneNum, zone.Min, zone.Max, f.formatDuration(int(zone.Time)), percentage))
+			}
+			zoneNum++
+		}
+
+		if zones.HeartRate.SensorBased {
+			builder.WriteString("- Data Source: Heart Rate Sensor\n")
+		} else {
+			builder.WriteString("- Data Source: Estimated\n")
+		}
+		builder.WriteString("\n")
+	}
+
+	// Power Zones
+	if zones.Power != nil && len(zones.Power.Zones) > 0 {
+		builder.WriteString("⚡ **Power Zones:**\n")
+		totalTime := 0.0
+		for _, zone := range zones.Power.Zones {
+			totalTime += zone.Time
+		}
+
+		zoneNum := 1
+		for _, zone := range zones.Power.Zones {
+			// Skip zones with -1 min values (invalid zones)
+			if zone.Min == -1 {
+				continue
+			}
+			percentage := zone.Time / totalTime * 100
+			// Format zone range, using "+" for zones with -1 max (no upper limit)
+			if zone.Max == -1 {
+				builder.WriteString(fmt.Sprintf("- **Zone %d** (%.0f+ watts): %s (%.1f%%)\n",
+					zoneNum, zone.Min, f.formatDuration(int(zone.Time)), percentage))
+			} else {
+				builder.WriteString(fmt.Sprintf("- **Zone %d** (%.0f-%.0f watts): %s (%.1f%%)\n",
+					zoneNum, zone.Min, zone.Max, f.formatDuration(int(zone.Time)), percentage))
+			}
+			zoneNum++
+		}
+
+		if zones.Power.SensorBased {
+			builder.WriteString("- Data Source: Power Meter\n")
+		} else {
+			builder.WriteString("- Data Source: Estimated\n")
+		}
+		builder.WriteString("\n")
+	}
+
+	// Pace Zones
+	if zones.Pace != nil && len(zones.Pace.Zones) > 0 {
+		builder.WriteString("🏃 **Pace Zones:**\n")
+		totalTime := 0.0
+		for _, zone := range zones.Pace.Zones {
+			totalTime += zone.Time
+		}
+
+		for i, zone := range zones.Pace.Zones {
+			percentage := zone.Time / totalTime * 100
+			// Convert pace from seconds per meter to minutes per kilometer
+			minPaceKm := float64(zone.Min) * 1000 / 60
+			maxPaceKm := float64(zone.Max) * 1000 / 60
+			builder.WriteString(fmt.Sprintf("- **Zone %d** (%.1f-%.1f min/km): %s (%.1f%%)\n",
+				i+1, minPaceKm, maxPaceKm, f.formatDuration(int(zone.Time)), percentage))
+		}
+		builder.WriteString("\n")
+	}
+
+	if zones.HeartRate == nil && zones.Power == nil && zones.Pace == nil {
+		return "📈 **Training Zone Analysis**\n\n❌ No zone data available for this activity"
+	}
+
+	return builder.String()
+}
+
 // FormatStreamData formats stream data based on the specified mode
 func (f *outputFormatter) FormatStreamData(streams *StravaStreams, mode string) string {
 	if streams == nil {
@@ -355,23 +751,23 @@ func (f *outputFormatter) FormatStreamData(streams *StravaStreams, mode string) 
 	}
 
 	var builder strings.Builder
-	
+
 	// Header with mode information
 	builder.WriteString(fmt.Sprintf("📊 **Stream Data** (%s mode)\n\n", mode))
-	
+
 	// Count total data points
 	totalPoints := f.countStreamDataPoints(streams)
 	builder.WriteString(fmt.Sprintf("**Total Data Points:** %d\n\n", totalPoints))
-	
+
 	// List available stream types
 	streamTypes := f.getStreamTypes(streams)
 	builder.WriteString("**Available Streams:**\n")
 	for _, streamType := range streamTypes {
 		builder.WriteString(fmt.Sprintf("- %s\n", streamType))
 	}
-	
+
 	builder.WriteString("\n**Stream Data Summary:**\n")
-	
+
 	// Format each stream type with basic statistics
 	if len(streams.Time) > 0 {
 		builder.WriteString(fmt.Sprintf("- **Time:** %d data points (0-%d seconds)\n", len(streams.Time), streams.Time[len(streams.Time)-1]))
@@ -427,7 +823,7 @@ func (f *outputFormatter) FormatStreamData(streams *StravaStreams, mode string) 
 	if len(streams.Latlng) > 0 {
 		builder.WriteString(fmt.Sprintf("- **GPS Coordinates:** %d data points\n", len(streams.Latlng)))
 	}
-	
+
 	return builder.String()
 }
 
@@ -439,7 +835,7 @@ func (f *outputFormatter) FormatDerivedFeatures(features interface{}) string {
 	}
 
 	var builder strings.Builder
-	
+
 	// Header with activity ID
 	builder.WriteString(fmt.Sprintf("📊 **Stream Analysis** (Activity ID: %d)\n\n", derivedFeatures.ActivityID))
 
@@ -477,28 +873,28 @@ func (f *outputFormatter) FormatStreamSummary(summary interface{}) string {
 	}
 
 	var builder strings.Builder
-	
+
 	// Header with activity ID and model info
 	builder.WriteString(fmt.Sprintf("🤖 **AI Stream Summary** (Activity ID: %d)\n\n", streamSummary.ActivityID))
-	
+
 	if streamSummary.Model != "" {
 		builder.WriteString(fmt.Sprintf("**Model:** %s", streamSummary.Model))
-		if streamSummary.TokensUsed > 0 {
-			builder.WriteString(fmt.Sprintf(" | **Tokens Used:** %d", streamSummary.TokensUsed))
-		}
+		// if streamSummary.TokensUsed > 0 {
+		// 	builder.WriteString(fmt.Sprintf(" | **Tokens Used:** %d", streamSummary.TokensUsed))
+		// }
 		builder.WriteString("\n\n")
 	}
-	
+
 	// Show the custom prompt used
 	if streamSummary.SummaryPrompt != "" {
 		builder.WriteString("**Analysis Request:**\n")
 		builder.WriteString(fmt.Sprintf("> %s\n\n", streamSummary.SummaryPrompt))
 	}
-	
+
 	// Add the AI-generated summary
 	builder.WriteString("**AI Analysis:**\n\n")
 	builder.WriteString(streamSummary.Summary)
-	
+
 	return builder.String()
 }
 
@@ -510,18 +906,18 @@ func (f *outputFormatter) FormatStreamPage(page interface{}) string {
 	}
 
 	var builder strings.Builder
-	
+
 	// Page header with navigation info
-	builder.WriteString(fmt.Sprintf("📄 **Page %d of %d** for Activity %d\n\n", 
+	builder.WriteString(fmt.Sprintf("📄 **Page %d of %d** for Activity %d\n\n",
 		streamPage.PageNumber, streamPage.TotalPages, streamPage.ActivityID))
-	
+
 	// Add time range information
 	if streamPage.TimeRange.StartTime > 0 && streamPage.TimeRange.EndTime > 0 {
 		duration := streamPage.TimeRange.EndTime - streamPage.TimeRange.StartTime
-		builder.WriteString(fmt.Sprintf("**Time Range:** %d-%d seconds (Duration: %d seconds)\n\n", 
+		builder.WriteString(fmt.Sprintf("**Time Range:** %d-%d seconds (Duration: %d seconds)\n\n",
 			streamPage.TimeRange.StartTime, streamPage.TimeRange.EndTime, duration))
 	}
-	
+
 	// Processing mode information
 	builder.WriteString("**Processing Mode:** ")
 	switch streamPage.ProcessingMode {
@@ -535,7 +931,7 @@ func (f *outputFormatter) FormatStreamPage(page interface{}) string {
 		builder.WriteString(streamPage.ProcessingMode)
 	}
 	builder.WriteString("\n\n")
-	
+
 	// Add the processed data
 	if dataStr, ok := streamPage.Data.(string); ok {
 		builder.WriteString(dataStr)
@@ -543,31 +939,31 @@ func (f *outputFormatter) FormatStreamPage(page interface{}) string {
 		builder.WriteString("**Processed Data:**\n")
 		builder.WriteString(fmt.Sprintf("%+v", streamPage.Data))
 	}
-	
+
 	// Navigation instructions
 	if streamPage.HasNextPage {
 		builder.WriteString("\n\n**Navigation:**\n")
 		builder.WriteString(fmt.Sprintf("- Next page: Call get-activity-streams with page_number=%d\n", streamPage.PageNumber+1))
-		
+
 		if streamPage.PageNumber > 1 {
 			builder.WriteString(fmt.Sprintf("- Previous page: Call get-activity-streams with page_number=%d\n", streamPage.PageNumber-1))
 		}
-		
+
 		builder.WriteString(fmt.Sprintf("- Jump to specific page: Call get-activity-streams with page_number=X (1-%d)\n", streamPage.TotalPages))
 		builder.WriteString("- Get full dataset: Call get-activity-streams with page_size=-1\n")
-		
+
 		builder.WriteString("\n💡 **Tip:** Analyze this page's data before requesting the next page to maintain context efficiency.")
 	} else {
 		builder.WriteString("\n\n✅ **Complete:** This is the final page of data for this activity.")
 	}
-	
+
 	// Add footer with token usage info
-	builder.WriteString(fmt.Sprintf("\n\n📊 **Page Stats:** %d estimated tokens", streamPage.EstimatedTokens))
-	
+	// builder.WriteString(fmt.Sprintf("\n\n📊 **Page Stats:** %d estimated tokens", streamPage.EstimatedTokens))
+
 	if streamPage.HasNextPage {
 		builder.WriteString(fmt.Sprintf(" | Next: page %d", streamPage.PageNumber+1))
 	}
-	
+
 	return builder.String()
 }
 
@@ -636,11 +1032,11 @@ func (f *outputFormatter) formatSpeed(speedMPS float64) string {
 // formatDuration formats duration in human-readable format
 func (f *outputFormatter) formatDuration(seconds int) string {
 	duration := time.Duration(seconds) * time.Second
-	
+
 	hours := int(duration.Hours())
 	minutes := int(duration.Minutes()) % 60
 	secs := int(duration.Seconds()) % 60
-	
+
 	if hours > 0 {
 		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, secs)
 	}
@@ -650,11 +1046,11 @@ func (f *outputFormatter) formatDuration(seconds int) string {
 // formatOverviewSection formats the overview with key metrics
 func (f *outputFormatter) formatOverviewSection(builder *strings.Builder, summary *FeatureSummary) {
 	builder.WriteString("## 📈 **Overview**\n\n")
-	
+
 	// Duration and data points
-	builder.WriteString(fmt.Sprintf("- **Duration:** %s (%d data points)\n", 
+	builder.WriteString(fmt.Sprintf("- **Duration:** %s (%d data points)\n",
 		f.formatDuration(summary.Duration), summary.TotalDataPoints))
-	
+
 	// Distance and elevation
 	if summary.TotalDistance > 0 {
 		builder.WriteString(fmt.Sprintf("- **Distance:** %s", f.formatDistance(summary.TotalDistance)))
@@ -666,80 +1062,80 @@ func (f *outputFormatter) formatOverviewSection(builder *strings.Builder, summar
 		}
 		builder.WriteString("\n")
 	}
-	
+
 	// Stream types available
 	if len(summary.StreamTypes) > 0 {
 		builder.WriteString(fmt.Sprintf("- **Available Data:** %s\n", strings.Join(summary.StreamTypes, ", ")))
 	}
-	
+
 	// Moving time percentage
 	if summary.MovingTimePercent > 0 {
 		builder.WriteString(fmt.Sprintf("- **Moving Time:** %.1f%% of total time\n", summary.MovingTimePercent))
 	}
-	
+
 	builder.WriteString("\n")
 }
 
 // formatStatisticsSection formats statistical analysis for all metrics
 func (f *outputFormatter) formatStatisticsSection(builder *strings.Builder, stats *StreamStatistics) {
 	builder.WriteString("## 📊 **Statistical Analysis**\n\n")
-	
+
 	// Heart Rate Analysis
 	if stats.HeartRate != nil {
 		builder.WriteString("### 💓 **Heart Rate Analysis**\n")
 		f.formatMetricStats(builder, "Heart Rate", stats.HeartRate, "bpm")
 		builder.WriteString("\n")
 	}
-	
+
 	// Power Analysis
 	if stats.Power != nil {
 		builder.WriteString("### ⚡ **Power Analysis**\n")
 		f.formatMetricStats(builder, "Power", stats.Power, "W")
 		builder.WriteString("\n")
 	}
-	
+
 	// Speed Analysis
 	if stats.VelocitySmooth != nil {
 		builder.WriteString("### 🏃 **Speed Analysis**\n")
 		f.formatSpeedStats(builder, stats.VelocitySmooth)
 		builder.WriteString("\n")
 	}
-	
+
 	// Elevation Analysis
 	if stats.Altitude != nil {
 		builder.WriteString("### ⛰️ **Elevation Analysis**\n")
 		f.formatMetricStats(builder, "Altitude", stats.Altitude, "m")
 		builder.WriteString("\n")
 	}
-	
+
 	// Cadence Analysis
 	if stats.Cadence != nil {
 		builder.WriteString("### 🔄 **Cadence Analysis**\n")
 		f.formatMetricStats(builder, "Cadence", stats.Cadence, "rpm")
 		builder.WriteString("\n")
 	}
-	
+
 	// Temperature Analysis
 	if stats.Temperature != nil {
 		builder.WriteString("### 🌡️ **Temperature Analysis**\n")
 		f.formatMetricStats(builder, "Temperature", stats.Temperature, "°C")
 		builder.WriteString("\n")
 	}
-	
+
 	// Grade Analysis
 	if stats.Grade != nil {
 		builder.WriteString("### 📐 **Grade Analysis**\n")
 		f.formatMetricStats(builder, "Grade", stats.Grade, "%")
 		builder.WriteString("\n")
 	}
-	
+
 	// Moving Time Analysis
 	if stats.Moving != nil {
 		builder.WriteString("### 🚶 **Moving Time Analysis**\n")
 		f.formatBooleanStats(builder, stats.Moving)
 		builder.WriteString("\n")
 	}
-	
+
 	// Location Analysis
 	if stats.LatLng != nil {
 		builder.WriteString("### 🗺️ **Location Analysis**\n")
@@ -750,11 +1146,11 @@ func (f *outputFormatter) formatStatisticsSection(builder *strings.Builder, stat
 
 // formatMetricStats formats statistics for a numeric metric
 func (f *outputFormatter) formatMetricStats(builder *strings.Builder, metricName string, stats *MetricStats, unit string) {
-	builder.WriteString(fmt.Sprintf("- **Range:** %.1f - %.1f %s (Mean: %.1f %s)\n", 
+	builder.WriteString(fmt.Sprintf("- **Range:** %.1f - %.1f %s (Mean: %.1f %s)\n",
 		stats.Min, stats.Max, unit, stats.Mean, unit))
-	builder.WriteString(fmt.Sprintf("- **Median:** %.1f %s (Q25: %.1f, Q75: %.1f)\n", 
+	builder.WriteString(fmt.Sprintf("- **Median:** %.1f %s (Q25: %.1f, Q75: %.1f)\n",
 		stats.Median, unit, stats.Q25, stats.Q75))
-	builder.WriteString(fmt.Sprintf("- **Variability:** %.1f%% (StdDev: %.1f %s)\n", 
+	builder.WriteString(fmt.Sprintf("- **Variability:** %.1f%% (StdDev: %.1f %s)\n",
 		stats.Variability*100, stats.StdDev, unit))
 	builder.WriteString(fmt.Sprintf("- **Data Points:** %d\n", stats.Count))
 }
@@ -766,20 +1162,20 @@ func (f *outputFormatter) formatSpeedStats(builder *strings.Builder, stats *Metr
 	maxKmh := stats.Max * 3.6
 	meanKmh := stats.Mean * 3.6
 	medianKmh := stats.Median * 3.6
-	
-	builder.WriteString(fmt.Sprintf("- **Range:** %.1f - %.1f km/h (Mean: %.1f km/h)\n", 
+
+	builder.WriteString(fmt.Sprintf("- **Range:** %.1f - %.1f km/h (Mean: %.1f km/h)\n",
 		minKmh, maxKmh, meanKmh))
 	builder.WriteString(fmt.Sprintf("- **Median:** %.1f km/h\n", medianKmh))
-	builder.WriteString(fmt.Sprintf("- **Variability:** %.1f%% (StdDev: %.1f km/h)\n", 
+	builder.WriteString(fmt.Sprintf("- **Variability:** %.1f%% (StdDev: %.1f km/h)\n",
 		stats.Variability*100, stats.StdDev*3.6))
 	builder.WriteString(fmt.Sprintf("- **Data Points:** %d\n", stats.Count))
 }
 
 // formatBooleanStats formats statistics for boolean metrics
 func (f *outputFormatter) formatBooleanStats(builder *strings.Builder, stats *BooleanStats) {
-	builder.WriteString(fmt.Sprintf("- **Moving:** %d data points (%.1f%%)\n", 
+	builder.WriteString(fmt.Sprintf("- **Moving:** %d data points (%.1f%%)\n",
 		stats.TrueCount, stats.TruePercent))
-	builder.WriteString(fmt.Sprintf("- **Stopped:** %d data points (%.1f%%)\n", 
+	builder.WriteString(fmt.Sprintf("- **Stopped:** %d data points (%.1f%%)\n",
 		stats.FalseCount, stats.FalsePercent))
 	builder.WriteString(fmt.Sprintf("- **Total Data Points:** %d\n", stats.TotalCount))
 }
@@ -789,9 +1185,9 @@ func (f *outputFormatter) formatLocationStats(builder *strings.Builder, stats *L
 	builder.WriteString(fmt.Sprintf("- **Start:** %.6f, %.6f\n", stats.StartLat, stats.StartLng))
 	builder.WriteString(fmt.Sprintf("- **End:** %.6f, %.6f\n", stats.EndLat, stats.EndLng))
 	builder.WriteString("- **Bounding Box:**\n")
-	builder.WriteString(fmt.Sprintf("  - North: %.6f, South: %.6f\n", 
+	builder.WriteString(fmt.Sprintf("  - North: %.6f, South: %.6f\n",
 		stats.BoundingBox.NorthLat, stats.BoundingBox.SouthLat))
-	builder.WriteString(fmt.Sprintf("  - East: %.6f, West: %.6f\n", 
+	builder.WriteString(fmt.Sprintf("  - East: %.6f, West: %.6f\n",
 		stats.BoundingBox.EastLng, stats.BoundingBox.WestLng))
 	builder.WriteString(fmt.Sprintf("- **GPS Points:** %d\n", stats.TotalPoints))
 }
@@ -801,9 +1197,9 @@ func (f *outputFormatter) formatTrendsSection(builder *strings.Builder, trends [
 	if len(trends) == 0 {
 		return
 	}
-	
+
 	builder.WriteString("## 📈 **Trend Analysis**\n\n")
-	
+
 	for _, trend := range trends {
 		directionEmoji := f.getTrendEmoji(trend.Direction)
 		builder.WriteString(fmt.Sprintf("- **%s %s:** %s trend from %s to %s (Magnitude: %.2f, Confidence: %.1f%%)\n",
@@ -811,7 +1207,7 @@ func (f *outputFormatter) formatTrendsSection(builder *strings.Builder, trends [
 			f.formatDuration(trend.StartTime), f.formatDuration(trend.EndTime),
 			trend.Magnitude, trend.Confidence*100))
 	}
-	
+
 	builder.WriteString("\n")
 }
 
@@ -820,15 +1216,15 @@ func (f *outputFormatter) formatSpikesSection(builder *strings.Builder, spikes [
 	if len(spikes) == 0 {
 		return
 	}
-	
+
 	builder.WriteString("## 🔥 **Spikes and Anomalies**\n\n")
-	
+
 	for _, spike := range spikes {
 		builder.WriteString(fmt.Sprintf("- **%s Spike:** %.1f at %s (Magnitude: %.2fx, Duration: %ds)\n",
 			spike.Metric, spike.Value, f.formatDuration(spike.Time),
 			spike.Magnitude, spike.Duration))
 	}
-	
+
 	builder.WriteString("\n")
 }
 
@@ -837,32 +1233,32 @@ func (f *outputFormatter) formatInflectionPointsSection(builder *strings.Builder
 	if len(points) == 0 {
 		return
 	}
-	
+
 	builder.WriteString("## 🔄 **Inflection Points**\n\n")
-	
+
 	for _, point := range points {
 		builder.WriteString(fmt.Sprintf("- **%s:** %.1f at %s (Direction: %s, Magnitude: %.2f)\n",
 			point.Metric, point.Value, f.formatDuration(point.Time),
 			point.Direction, point.Magnitude))
 	}
-	
+
 	builder.WriteString("\n")
 }
 
 // formatLapAnalysisSection formats lap-by-lap analysis
 func (f *outputFormatter) formatLapAnalysisSection(builder *strings.Builder, lapAnalysis *LapAnalysis) {
 	builder.WriteString("## 🏁 **Lap-by-Lap Analysis**\n\n")
-	
+
 	// Overview
-	builder.WriteString(fmt.Sprintf("**Segmentation:** %s (%d segments)\n\n", 
+	builder.WriteString(fmt.Sprintf("**Segmentation:** %s (%d segments)\n\n",
 		lapAnalysis.SegmentationType, lapAnalysis.TotalLaps))
-	
+
 	// Lap summaries
 	builder.WriteString("### 📊 **Lap Performance Summary**\n\n")
 	for _, lap := range lapAnalysis.LapSummaries {
 		f.formatLapSummary(builder, &lap)
 	}
-	
+
 	// Lap comparisons
 	builder.WriteString("### 🏆 **Lap Comparisons**\n\n")
 	f.formatLapComparisons(builder, &lapAnalysis.LapComparisons)
@@ -874,16 +1270,16 @@ func (f *outputFormatter) formatLapSummary(builder *strings.Builder, lap *LapSum
 	if lap.LapName != "" {
 		lapName = lap.LapName
 	}
-	
+
 	builder.WriteString(fmt.Sprintf("**%s:** ", lapName))
-	
+
 	// Distance and duration
 	if lap.Distance > 0 {
 		builder.WriteString(fmt.Sprintf("%.2fkm in %s", lap.Distance/1000, f.formatDuration(lap.Duration)))
 	} else {
 		builder.WriteString(fmt.Sprintf("%s", f.formatDuration(lap.Duration)))
 	}
-	
+
 	// Key metrics
 	metrics := []string{}
 	if lap.AvgSpeed > 0 {
@@ -895,11 +1291,11 @@ func (f *outputFormatter) formatLapSummary(builder *strings.Builder, lap *LapSum
 	if lap.AvgPower > 0 {
 		metrics = append(metrics, fmt.Sprintf("Avg Power: %.0fW", lap.AvgPower))
 	}
-	
+
 	if len(metrics) > 0 {
 		builder.WriteString(fmt.Sprintf(" - %s", strings.Join(metrics, ", ")))
 	}
-	
+
 	builder.WriteString("\n")
 }
 
@@ -907,14 +1303,14 @@ func (f *outputFormatter) formatLapSummary(builder *strings.Builder, lap *LapSum
 func (f *outputFormatter) formatLapComparisons(builder *strings.Builder, comparisons *LapComparisons) {
 	builder.WriteString(fmt.Sprintf("- **Fastest Lap:** Lap %d\n", comparisons.FastestLap))
 	builder.WriteString(fmt.Sprintf("- **Slowest Lap:** Lap %d\n", comparisons.SlowestLap))
-	
+
 	if comparisons.HighestPowerLap > 0 {
 		builder.WriteString(fmt.Sprintf("- **Highest Power:** Lap %d\n", comparisons.HighestPowerLap))
 	}
 	if comparisons.HighestHRLap > 0 {
 		builder.WriteString(fmt.Sprintf("- **Highest HR:** Lap %d\n", comparisons.HighestHRLap))
 	}
-	
+
 	builder.WriteString(fmt.Sprintf("- **Speed Variation:** %.1f%% across laps\n", comparisons.SpeedVariation*100))
 	if comparisons.PowerVariation > 0 {
 		builder.WriteString(fmt.Sprintf("- **Power Variation:** %.1f%% across laps\n", comparisons.PowerVariation*100))
@@ -922,7 +1318,7 @@ func (f *outputFormatter) formatLapComparisons(builder *strings.Builder, compari
 	if comparisons.HRVariation > 0 {
 		builder.WriteString(fmt.Sprintf("- **HR Variation:** %.1f%% across laps\n", comparisons.HRVariation*100))
 	}
-	
+
 	builder.WriteString(fmt.Sprintf("- **Consistency Score:** %.1f/10\n", comparisons.ConsistencyScore*10))
 	builder.WriteString("\n")
 }
@@ -932,20 +1328,20 @@ func (f *outputFormatter) formatSampleDataSection(builder *strings.Builder, samp
 	if len(sampleData) == 0 {
 		return
 	}
-	
+
 	builder.WriteString("## 📋 **Sample Data Points**\n\n")
 	builder.WriteString("Representative data points from the activity:\n\n")
-	
+
 	// Show up to 5 sample points
 	maxSamples := len(sampleData)
 	if maxSamples > 5 {
 		maxSamples = 5
 	}
-	
+
 	for i := 0; i < maxSamples; i++ {
 		point := sampleData[i]
 		builder.WriteString(fmt.Sprintf("**Time %s:**", f.formatDuration(point.TimeOffset)))
-		
+
 		values := []string{}
 		for metric, value := range point.Values {
 			switch v := value.(type) {
@@ -959,17 +1355,17 @@ func (f *outputFormatter) formatSampleDataSection(builder *strings.Builder, samp
 				values = append(values, fmt.Sprintf("%s: %v", metric, v))
 			}
 		}
-		
+
 		if len(values) > 0 {
 			builder.WriteString(fmt.Sprintf(" %s", strings.Join(values, ", ")))
 		}
 		builder.WriteString("\n")
 	}
-	
+
 	if len(sampleData) > 5 {
 		builder.WriteString(fmt.Sprintf("\n*... and %d more data points*\n", len(sampleData)-5))
 	}
-	
+
 	builder.WriteString("\n")
 }
 
@@ -991,7 +1387,7 @@ func (f *outputFormatter) getTrendEmoji(direction string) string {
 
 func (f *outputFormatter) countStreamDataPoints(data *StravaStreams) int {
 	maxPoints := 0
-	
+
 	if len(data.Time) > maxPoints {
 		maxPoints = len(data.Time)
 	}
@@ -1025,13 +1421,13 @@ func (f *outputFormatter) countStreamDataPoints(data *StravaStreams) int {
 	if len(data.Latlng) > maxPoints {
 		maxPoints = len(data.Latlng)
 	}
-	
+
 	return maxPoints
 }
 
 func (f *outputFormatter) getStreamTypes(data *StravaStreams) []string {
 	var types []string
-	
+
 	if len(data.Time) > 0 {
 		types = append(types, "time")
 	}
@@ -1065,7 +1461,7 @@ func (f *outputFormatter) getStreamTypes(data *StravaStreams) []string {
 	if len(data.Latlng) > 0 {
 		types = append(types, "latlng")
 	}
-	
+
 	return types
 }
 
@@ -1073,7 +1469,7 @@ func (f *outputFormatter) findMinMaxInt(data []int) (int, int) {
 	if len(data) == 0 {
 		return 0, 0
 	}
-	
+
 	min, max := data[0], data[0]
 	for _, v := range data {
 		if v < min {
@@ -1090,7 +1486,7 @@ func (f *outputFormatter) findMinMaxFloat(data []float64) (float64, float64) {
 	if len(data) == 0 {
 		return 0, 0
 	}
-	
+
 	min, max := data[0], data[0]
 	for _, v := range data {
 		if v < min {
@@ -1107,7 +1503,7 @@ func (f *outputFormatter) calculateAvgInt(data []int) float64 {
 	if len(data) == 0 {
 		return 0
 	}
-	
+
 	sum := 0
 	for _, v := range data {
 		sum += v
@@ -1119,7 +1515,7 @@ func (f *outputFormatter) calculateAvgFloat(data []float64) float64 {
 	if len(data) == 0 {
 		return 0
 	}
-	
+
 	sum := 0.0
 	for _, v := range data {
 		sum += v

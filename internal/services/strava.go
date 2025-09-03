@@ -75,14 +75,62 @@ type StravaActivity struct {
 
 type StravaActivityDetail struct {
 	StravaActivity
-	Description         string                `json:"description"`
-	Calories            float64               `json:"calories"`
-	SegmentEfforts      []StravaSegmentEffort `json:"segment_efforts"`
-	Splits              []StravaSplit         `json:"splits_metric"`
-	Laps                []StravaLap           `json:"laps"`
-	Gear                StravaGear            `json:"gear"`
-	Photos              StravaPhotos          `json:"photos"`
-	HighlightedKudosers []StravaAthlete       `json:"highlighted_kudosers"`
+	ResourceState       int                     `json:"resource_state"`
+	Description         string                  `json:"description"`
+	Calories            float64                 `json:"calories"`
+	SegmentEfforts      []StravaSegmentEffort   `json:"segment_efforts"`
+	Splits              []StravaSplit           `json:"splits_metric"`
+	SplitsStandard      []StravaSplitStandard   `json:"splits_standard"`
+	BestEfforts         []StravaBestEffort      `json:"best_efforts"`
+	Laps                []StravaLap             `json:"laps"`
+	Gear                StravaGear              `json:"gear"`
+	Photos              StravaPhotos            `json:"photos"`
+	HighlightedKudosers []StravaAthlete         `json:"highlighted_kudosers"`
+	SimilarActivities   StravaSimilarActivities `json:"similar_activities"`
+	AvailableZones      []string                `json:"available_zones"`
+
+	// Enhanced athlete information
+	Athlete StravaAthleteRef `json:"athlete"`
+
+	// Location data
+	StartLatlng     []float64 `json:"start_latlng"`
+	EndLatlng       []float64 `json:"end_latlng"`
+	LocationCity    string    `json:"location_city"`
+	LocationState   string    `json:"location_state"`
+	LocationCountry string    `json:"location_country"`
+
+	// Achievement and social metrics
+	AchievementCount int  `json:"achievement_count"`
+	TotalPhotoCount  int  `json:"total_photo_count"`
+	HasKudoed        bool `json:"has_kudoed"`
+
+	// Enhanced cadence metrics
+	AverageCadence float64 `json:"average_cadence"`
+
+	// Enhanced power metrics
+	WeightedAverageWatts float64 `json:"weighted_average_watts"`
+
+	// Enhanced temperature metrics
+	AverageTemp float64 `json:"average_temp"`
+
+	// Strava-specific metrics
+	SufferScore             float64 `json:"suffer_score"`
+	PerceivedExertion       int     `json:"perceived_exertion"`
+	PreferPerceivedExertion bool    `json:"prefer_perceived_exertion"`
+
+	// Privacy and display options
+	HeartrateOptOut            bool `json:"heartrate_opt_out"`
+	DisplayHideHeartrateOption bool `json:"display_hide_heartrate_option"`
+	HideFromHome               bool `json:"hide_from_home"`
+
+	// Upload and external tracking
+	UploadID        int64  `json:"upload_id"`
+	UploadIDStr     string `json:"upload_id_str"`
+	ExternalID      string `json:"external_id"`
+	FromAcceptedTag bool   `json:"from_accepted_tag"`
+
+	// Device information
+	DeviceName string `json:"device_name"`
 }
 
 type StravaSegmentEffort struct {
@@ -109,23 +157,31 @@ type StravaSplit struct {
 }
 
 type StravaLap struct {
-	ID                 int64   `json:"id"`
-	Name               string  `json:"name"`
-	ElapsedTime        int     `json:"elapsed_time"`
-	MovingTime         int     `json:"moving_time"`
-	StartDate          string  `json:"start_date"`
-	Distance           float64 `json:"distance"`
-	StartIndex         int     `json:"start_index"`
-	EndIndex           int     `json:"end_index"`
-	TotalElevationGain float64 `json:"total_elevation_gain"`
-	AverageSpeed       float64 `json:"average_speed"`
-	MaxSpeed           float64 `json:"max_speed"`
-	AverageHeartrate   float64 `json:"average_heartrate"`
-	MaxHeartrate       float64 `json:"max_heartrate"`
-	AveragePower       float64 `json:"average_power"`
-	MaxPower           float64 `json:"max_power"`
-	LapIndex           int     `json:"lap_index"`
-	Split              int     `json:"split"`
+	ID                 int64             `json:"id"`
+	ResourceState      int               `json:"resource_state"`
+	Name               string            `json:"name"`
+	Activity           StravaActivityRef `json:"activity"`
+	Athlete            StravaAthleteRef  `json:"athlete"`
+	ElapsedTime        int               `json:"elapsed_time"`
+	MovingTime         int               `json:"moving_time"`
+	StartDate          string            `json:"start_date"`
+	StartDateLocal     string            `json:"start_date_local"`
+	Distance           float64           `json:"distance"`
+	StartIndex         int               `json:"start_index"`
+	EndIndex           int               `json:"end_index"`
+	TotalElevationGain float64           `json:"total_elevation_gain"`
+	AverageSpeed       float64           `json:"average_speed"`
+	MaxSpeed           float64           `json:"max_speed"`
+	AverageHeartrate   float64           `json:"average_heartrate"`
+	MaxHeartrate       float64           `json:"max_heartrate"`
+	AveragePower       float64           `json:"average_power"`
+	MaxPower           float64           `json:"max_power"`
+	AverageCadence     float64           `json:"average_cadence"`
+	DeviceWatts        bool              `json:"device_watts"`
+	AverageWatts       float64           `json:"average_watts"`
+	LapIndex           int               `json:"lap_index"`
+	Split              int               `json:"split"`
+	PaceZone           int               `json:"pace_zone"`
 }
 
 type StravaGear struct {
@@ -150,10 +206,145 @@ type StravaPhoto struct {
 	URLs     map[string]string `json:"urls"`
 }
 
+// StravaSplitStandard represents standard splits (typically mile or kilometer splits)
+type StravaSplitStandard struct {
+	Distance                  float64 `json:"distance"`
+	ElapsedTime               int     `json:"elapsed_time"`
+	ElevationDifference       float64 `json:"elevation_difference"`
+	MovingTime                int     `json:"moving_time"`
+	Split                     int     `json:"split"`
+	AverageSpeed              float64 `json:"average_speed"`
+	AverageGradeAdjustedSpeed float64 `json:"average_grade_adjusted_speed"`
+	AverageHeartrate          float64 `json:"average_heartrate"`
+	AveragePower              float64 `json:"average_power"`
+	AverageCadence            float64 `json:"average_cadence"`
+	PaceZone                  int     `json:"pace_zone"`
+}
+
+// StravaBestEffort represents best effort segments within an activity
+type StravaBestEffort struct {
+	ID               int64               `json:"id"`
+	ResourceState    int                 `json:"resource_state"`
+	Name             string              `json:"name"`
+	Activity         StravaActivityRef   `json:"activity"`
+	Athlete          StravaAthleteRef    `json:"athlete"`
+	ElapsedTime      int                 `json:"elapsed_time"`
+	MovingTime       int                 `json:"moving_time"`
+	StartDate        string              `json:"start_date"`
+	StartDateLocal   string              `json:"start_date_local"`
+	Distance         float64             `json:"distance"`
+	StartIndex       int                 `json:"start_index"`
+	EndIndex         int                 `json:"end_index"`
+	AverageHeartrate float64             `json:"average_heartrate"`
+	MaxHeartrate     float64             `json:"max_heartrate"`
+	AveragePower     float64             `json:"average_power"`
+	MaxPower         float64             `json:"max_power"`
+	AverageCadence   float64             `json:"average_cadence"`
+	PRRank           int                 `json:"pr_rank"`
+	Achievements     []StravaAchievement `json:"achievements"`
+}
+
+// StravaAchievement represents achievements earned during best efforts
+type StravaAchievement struct {
+	TypeID int    `json:"type_id"`
+	Type   string `json:"type"`
+	Rank   int    `json:"rank"`
+}
+
+// StravaSimilarActivities represents similar activities for comparison
+type StravaSimilarActivities struct {
+	EffortCount        int              `json:"effort_count"`
+	AverageSpeed       float64          `json:"average_speed"`
+	MinAverageSpeed    float64          `json:"min_average_speed"`
+	MidAverageSpeed    float64          `json:"mid_average_speed"`
+	MaxAverageSpeed    float64          `json:"max_average_speed"`
+	PRRank             int              `json:"pr_rank"`
+	FrequencyMilestone string           `json:"frequency_milestone"`
+	TrendStats         StravaTrendStats `json:"trend"`
+	ResourceState      int              `json:"resource_state"`
+}
+
+// StravaTrendStats represents trend statistics for similar activities
+type StravaTrendStats struct {
+	Speeds               []float64 `json:"speeds"`
+	CurrentActivityIndex int       `json:"current_activity_index"`
+	MinSpeed             float64   `json:"min_speed"`
+	MidSpeed             float64   `json:"mid_speed"`
+	MaxSpeed             float64   `json:"max_speed"`
+	Direction            int       `json:"direction"`
+}
+
+// StravaAthleteRef represents a reference to an athlete in activity details
+type StravaAthleteRef struct {
+	ID            int64 `json:"id"`
+	ResourceState int   `json:"resource_state"`
+}
+
+// StravaActivityRef represents a reference to an activity
+type StravaActivityRef struct {
+	ID            int64 `json:"id"`
+	ResourceState int   `json:"resource_state"`
+}
+
+// StravaAthleteWithZones represents an athlete profile integrated with training zones
+type StravaAthleteWithZones struct {
+	*StravaAthlete
+	Zones *StravaAthleteZones `json:"zones,omitempty"`
+}
+
+// StravaAthleteZones represents an athlete's configured training zones
+type StravaAthleteZones struct {
+	HeartRate *StravaZoneSet `json:"heart_rate,omitempty"`
+	Power     *StravaZoneSet `json:"power,omitempty"`
+	Pace      *StravaZoneSet `json:"pace,omitempty"`
+}
+
+// StravaZoneSet represents a set of training zones for a specific metric
+type StravaZoneSet struct {
+	CustomZones   bool         `json:"custom_zones"`
+	Zones         []StravaZone `json:"zones"`
+	ResourceState int          `json:"resource_state"`
+}
+
+// StravaZone represents a single training zone with min/max boundaries
+type StravaZone struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
+}
+
+// StravaActivityZones represents training zone data for an activity
+type StravaActivityZones struct {
+	HeartRate *StravaZoneDistribution `json:"heart_rate,omitempty"`
+	Power     *StravaZoneDistribution `json:"power,omitempty"`
+	Pace      *StravaZoneDistribution `json:"pace,omitempty"`
+}
+
+// StravaActivityDetailWithZones represents an activity detail integrated with zone distribution data
+type StravaActivityDetailWithZones struct {
+	*StravaActivityDetail
+	Zones *StravaActivityZones `json:"zones,omitempty"`
+}
+
+// StravaZoneDistribution represents time spent in each training zone
+type StravaZoneDistribution struct {
+	CustomZones   bool             `json:"custom_zones"`
+	Zones         []StravaZoneData `json:"distribution_buckets"`
+	Type          string           `json:"type"`
+	ResourceState int              `json:"resource_state"`
+	SensorBased   bool             `json:"sensor_based"`
+}
+
+// StravaZoneData represents data for a specific training zone
+type StravaZoneData struct {
+	Min  float64 `json:"min"`
+	Max  float64 `json:"max"`
+	Time float64 `json:"time"`
+}
+
 // StravaStreamData represents a single stream's data structure
 type StravaStreamData struct {
-	Data       interface{} `json:"data"`
-	SeriesType string      `json:"series_type"`
+	Data       any    `json:"data"`
+	SeriesType string `json:"series_type"`
 }
 
 // StravaStreamsResponse represents the raw response from Strava API when key_by_type=true
@@ -224,10 +415,13 @@ type ActivityParams struct {
 
 // StravaService handles all Strava API interactions
 type StravaService interface {
-	GetAthleteProfile(user *models.User) (*StravaAthlete, error)
+	GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error)
+	GetAthleteZones(user *models.User) (*StravaAthleteZones, error)
 	GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error)
 	GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error)
+	GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error)
 	GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error)
+	GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error)
 	RefreshToken(refreshToken string) (*TokenResponse, error)
 }
 
@@ -349,42 +543,42 @@ func NewTestStravaService(cfg *config.Config, baseURL string, userRepo UserRepos
 }
 
 // executeWithTokenRefresh wraps API calls with automatic token refresh on 401 errors
-func (s *stravaService) executeWithTokenRefresh(user *models.User, apiCall func(string) (interface{}, error)) (interface{}, error) {
+func (s *stravaService) executeWithTokenRefresh(user *models.User, apiCall func(string) (any, error)) (any, error) {
 	// First attempt with current token
 	result, err := apiCall(user.AccessToken)
-	
+
 	// If we get a token expired error, try to refresh
 	if err != nil && (errors.Is(err, ErrTokenExpired) || errors.Is(err, ErrInvalidToken)) {
 		log.Printf("Token expired for user %s, attempting refresh", user.ID)
-		
+
 		// Attempt to refresh the token
 		tokenResp, refreshErr := s.RefreshToken(user.RefreshToken)
 		if refreshErr != nil {
 			log.Printf("Token refresh failed for user %s: %v", user.ID, refreshErr)
 			return nil, fmt.Errorf("failed to refresh Strava token: %w", refreshErr)
 		}
-		
+
 		// Update user with new tokens
 		user.AccessToken = tokenResp.AccessToken
 		user.RefreshToken = tokenResp.RefreshToken
 		user.TokenExpiry = time.Unix(tokenResp.ExpiresAt, 0)
-		
+
 		// Save updated tokens to database
 		ctx := context.Background()
 		if updateErr := s.userRepo.Update(ctx, user); updateErr != nil {
 			log.Printf("Failed to update user tokens in database for user %s: %v", user.ID, updateErr)
 			return nil, fmt.Errorf("failed to save refreshed tokens: %w", updateErr)
 		}
-		
+
 		log.Printf("Successfully refreshed tokens for user %s", user.ID)
-		
+
 		// Retry the original API call with new token
 		result, err = apiCall(user.AccessToken)
 		if err != nil {
 			return nil, fmt.Errorf("API call failed even after token refresh: %w", err)
 		}
 	}
-	
+
 	return result, err
 }
 
@@ -409,11 +603,6 @@ func (s *stravaService) defaultMakeRequest(method, endpoint string, accessToken 
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
-
-	fmt.Printf("Sending http request")
-	fmt.Printf("full url: %s", fullURL)
-	fmt.Printf("Token: %s", "Bearer "+accessToken)
-	fmt.Printf("Method: %s", method)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -462,23 +651,18 @@ func (s *stravaService) defaultMakeRequest(method, endpoint string, accessToken 
 	}
 }
 
-func (s *stravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
-	apiCall := func(accessToken string) (interface{}, error) {
+func (s *stravaService) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
+	// First get the basic athlete profile
+	apiCall := func(accessToken string) (any, error) {
 		body, err := s.makeRequest("GET", "/athlete", accessToken, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get athlete profile: %w", err)
 		}
 
-		// fmt.Println("body", )
-
 		var athlete StravaAthlete
 		if err := json.Unmarshal(body, &athlete); err != nil {
 			return nil, fmt.Errorf("failed to parse athlete profile: %w", err)
 		}
-
-		fmt.Printf("----------body----------------\n%s", string(body))
-
-		fmt.Printf("-----------xx----------------\nFTP: %d", athlete.FTP)
 
 		return &athlete, nil
 	}
@@ -488,11 +672,52 @@ func (s *stravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, er
 		return nil, err
 	}
 
-	return result.(*StravaAthlete), nil
+	athlete := result.(*StravaAthlete)
+
+	// Create the integrated profile with zones
+	profileWithZones := &StravaAthleteWithZones{
+		StravaAthlete: athlete,
+	}
+
+	// Attempt to fetch zone data - this is optional and may not be available
+	zones, err := s.GetAthleteZones(user)
+	if err != nil {
+		// Log the error but don't fail the entire request
+		// Zones may not be configured or accessible
+		log.Printf("Failed to fetch athlete zones for user %s: %v", user.ID, err)
+	} else {
+		profileWithZones.Zones = zones
+	}
+
+	return profileWithZones, nil
+}
+
+func (s *stravaService) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
+	apiCall := func(accessToken string) (any, error) {
+		body, err := s.makeRequest("GET", "/athlete/zones", accessToken, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get athlete zones: %w", err)
+		}
+
+		// Strava returns an array of zone sets
+		var zones StravaAthleteZones
+		if err := json.Unmarshal(body, &zones); err != nil {
+			return nil, fmt.Errorf("failed to parse athlete zones: %w", err)
+		}
+
+		return &zones, nil
+	}
+
+	result, err := s.executeWithTokenRefresh(user, apiCall)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*StravaAthleteZones), nil
 }
 
 func (s *stravaService) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
-	apiCall := func(accessToken string) (interface{}, error) {
+	apiCall := func(accessToken string) (any, error) {
 		urlParams := url.Values{}
 
 		if params.Before != nil {
@@ -530,7 +755,7 @@ func (s *stravaService) GetActivities(user *models.User, params ActivityParams) 
 }
 
 func (s *stravaService) GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error) {
-	apiCall := func(accessToken string) (interface{}, error) {
+	apiCall := func(accessToken string) (any, error) {
 		endpoint := fmt.Sprintf("/activities/%d", activityID)
 
 		body, err := s.makeRequest("GET", endpoint, accessToken, nil)
@@ -555,8 +780,35 @@ func (s *stravaService) GetActivityDetail(user *models.User, activityID int64) (
 	return result.(*StravaActivityDetail), nil
 }
 
+func (s *stravaService) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
+	// First get the basic activity detail
+	activityDetail, err := s.GetActivityDetail(user, activityID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the integrated activity detail with zones
+	activityWithZones := &StravaActivityDetailWithZones{
+		StravaActivityDetail: activityDetail,
+	}
+
+	// Attempt to fetch zone data if available - this is optional and may not be available
+	if len(activityDetail.AvailableZones) > 0 {
+		zones, err := s.GetActivityZones(user, activityID)
+		if err != nil {
+			// Log the error but don't fail the entire request
+			// Zone data may not be available for all activities
+			log.Printf("Failed to fetch activity zones for activity %d: %v", activityID, err)
+		} else {
+			activityWithZones.Zones = zones
+		}
+	}
+
+	return activityWithZones, nil
+}
+
 func (s *stravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
-	apiCall := func(accessToken string) (interface{}, error) {
+	apiCall := func(accessToken string) (any, error) {
 		endpoint := fmt.Sprintf("/activities/%d/streams", activityID)
 
 		params := url.Values{}
@@ -592,6 +844,45 @@ func (s *stravaService) GetActivityStreams(user *models.User, activityID int64, 
 	}
 
 	return result.(*StravaStreams), nil
+}
+
+func (s *stravaService) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
+	apiCall := func(accessToken string) (any, error) {
+		endpoint := fmt.Sprintf("/activities/%d/zones", activityID)
+
+		body, err := s.makeRequest("GET", endpoint, accessToken, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get activity zones: %w", err)
+		}
+
+		// Strava returns an array of zone distributions
+		var zoneDistributions []StravaZoneDistribution
+		if err := json.Unmarshal(body, &zoneDistributions); err != nil {
+			return nil, fmt.Errorf("failed to parse activity zones: %w", err)
+		}
+
+		// Convert to our structured format
+		zones := &StravaActivityZones{}
+		for _, dist := range zoneDistributions {
+			switch strings.ToLower(dist.Type) {
+			case "heartrate", "heart_rate":
+				zones.HeartRate = &dist
+			case "power":
+				zones.Power = &dist
+			case "pace":
+				zones.Pace = &dist
+			}
+		}
+
+		return zones, nil
+	}
+
+	result, err := s.executeWithTokenRefresh(user, apiCall)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*StravaActivityZones), nil
 }
 
 func (s *stravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {
@@ -640,7 +931,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 	for streamType, streamData := range rawStreams {
 		switch streamType {
 		case "time":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Time = make([]int, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -649,7 +940,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "distance":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Distance = make([]float64, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -658,10 +949,10 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "latlng":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Latlng = make([][]float64, len(data))
 				for i, v := range data {
-					if coords, ok := v.([]interface{}); ok && len(coords) == 2 {
+					if coords, ok := v.([]any); ok && len(coords) == 2 {
 						streams.Latlng[i] = make([]float64, 2)
 						if lat, ok := coords[0].(float64); ok {
 							streams.Latlng[i][0] = lat
@@ -673,7 +964,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "altitude":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Altitude = make([]float64, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -682,7 +973,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "velocity_smooth":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.VelocitySmooth = make([]float64, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -691,7 +982,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "heartrate":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Heartrate = make([]int, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -700,7 +991,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "cadence":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Cadence = make([]int, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -709,7 +1000,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "watts":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Watts = make([]int, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -718,7 +1009,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "temp":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Temp = make([]int, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {
@@ -727,7 +1018,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "moving":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.Moving = make([]bool, len(data))
 				for i, v := range data {
 					if val, ok := v.(bool); ok {
@@ -736,7 +1027,7 @@ func parseStreamsResponse(rawStreams StravaStreamsResponse) (*StravaStreams, err
 				}
 			}
 		case "grade_smooth":
-			if data, ok := streamData.Data.([]interface{}); ok {
+			if data, ok := streamData.Data.([]any); ok {
 				streams.GradeSmooth = make([]float64, len(data))
 				for i, v := range data {
 					if val, ok := v.(float64); ok {

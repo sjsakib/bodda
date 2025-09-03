@@ -201,6 +201,7 @@
   - _Requirements: 10.1, 10.2, 10.3, 10.5, 10.6_
 
 - [x] 21. Add logout functionality to chat interface
+
   - Add logout button to chat i nterface header with appropriate styling
   - Implement logout API endpoint that clears JWT tokens but preserves user data
   - Create frontend logout handler that clears browser tokens and redirects to landing page
@@ -209,3 +210,51 @@
   - Verify that re-login via Strava OAuth reconnects to existing user account and data
   - Write tests for logout flow, token cleanup, and re-login data continuity
   - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6_
+
+- [x] 22. Enhance activity details with comprehensive Strava data fields
+
+  - Add all missing fields to StravaActivityDetail struct: resource_state, athlete (id, resource_state), location_city, location_state, location_country, achievement_count, start_latlng, end_latlng, average_cadence, average_temp, weighted_average_watts, device_watts, kilojoules, heartrate_opt_out, display_hide_heartrate_option, upload_id, upload_id_str, external_id, from_accepted_tag, total_photo_count, has_kudoed, suffer_score, calories, perceived_exertion, prefer_perceived_exertion, hide_from_home, device_name
+  - Implement splits_standard array with distance, elapsed_time, elevation_difference, moving_time, split, average_speed, average_grade_adjusted_speed, average_heartrate, pace_zone fields
+  - Add best_efforts array with id, resource_state, name, activity reference, athlete reference, elapsed_time, moving_time, start_date, start_date_local, distance, pr_rank, achievements, start_index, end_index fields
+  - Create similar_activities struct with effort_count, average_speed, min_average_speed, mid_average_speed, max_average_speed, pr_rank, frequency_milestone, trend (speeds array, current_activity_index, min_speed, mid_speed, max_speed, direction), resource_state
+  - Add enhanced laps array with all fields: id, resource_state, name, activity reference, athlete reference, elapsed_time, moving_time, start_date, start_date_local, distance, average_speed, max_speed, lap_index, split, start_index, end_index, total_elevation_gain, average_cadence, device_watts, average_watts, average_heartrate, max_heartrate, pace_zone
+  - Include available_zones array (heartrate, pace, power) for training zone analysis capabilities
+  - Add GetActivityZones method to StravaService to fetch detailed zone data from /activities/{id}/zones API
+  - Create StravaActivityZones struct to handle heart rate, power, and pace zone distributions and time spent in each zone
+  - Integrate zones data into activity detail responses for comprehensive training zone analysis
+  - Update AI service tool responses to format all enhanced activity data in LLM-friendly format with clear labels, units, and structured presentation for optimal coaching analysis
+  - Update JSON parsing to handle all new fields with proper type conversion and null handling for optional fields
+  - Write comprehensive tests for enhanced activity detail parsing with real Strava API response samples including all new fields
+  - _Requirements: 5.2, 5.3 - Enhanced activity data provides richer context for AI coaching analysis_
+
+- [x] 23. Integrate athlete training zones into profile tool
+
+  - Add internal getAthleteZones method to StravaService to fetch athlete's configured training zones from /athlete/zones API
+  - Create StravaAthleteZones, StravaZoneSet, and StravaZone structs for zone boundary definitions (min/max values)
+  - Modify GetAthleteProfile method to return StravaAthleteWithZones that includes zone data
+  - Add zone parsing logic to handle different zone types (heart rate, power, pace) with proper type conversion
+  - Update athlete profile tool response to include zone data when available for comprehensive coaching context
+  - Handle cases where athletes haven't configured zones with appropriate messaging in profile response
+  - Write unit tests for integrated zone data parsing and API integration with mock Strava responses
+  - _Requirements: 5A.1, 5A.2, 5A.5 - Integrates athlete zone configuration into existing profile tool_
+
+- [x] 24. Integrate activity zones into activity details tool
+
+  - Add internal getActivityZones method to StravaService to fetch zone distribution data from /activities/{id}/zones API
+  - Create StravaActivityZones and StravaZoneDistribution structs for zone time distribution data
+  - Modify GetActivityDetail method to return StravaActivityDetailWithZones that includes zone distribution
+  - Update activity details tool response to include zone distribution data showing time spent in each training zone
+  - Add zone-specific progress messaging during analysis ("Analyzing your training zones...", "Reviewing zone distribution...")
+  - Update tool response formatting to present integrated zone and activity data clearly for LLM analysis
+  - Write tests for integrated zone tool execution and response formatting with realistic zone data
+  - _Requirements: 5A.3, 5A.4 - Integrates zone distribution data into existing activity details tool_
+
+- [ ] 25. Create comprehensive zone analysis workflows with integrated tools
+  - Implement zone distribution analysis using integrated athlete profile and activity detail tools
+  - Add zone-based training intensity assessment using time spent in each zone from activity details
+  - Create zone trend analysis across multiple activities for training load evaluation using existing tools
+  - Integrate zone analysis into logbook updates for persistent zone-based coaching insights
+  - Add zone-specific coaching recommendations based on training distribution patterns from integrated data
+  - Implement zone threshold analysis to identify when athletes are training outside their configured zones
+  - Write integration tests for complete zone analysis workflows using enhanced profile and activity tools
+  - _Requirements: 5A.3, 5A.4, 5A.6 - Provides comprehensive zone-based coaching analysis using integrated tools_

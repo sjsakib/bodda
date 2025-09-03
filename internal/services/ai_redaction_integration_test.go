@@ -831,9 +831,14 @@ type MockStravaService struct {
 	mock.Mock
 }
 
-func (m *MockStravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
+func (m *MockStravaService) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
 	args := m.Called(user)
-	return args.Get(0).(*StravaAthlete), args.Error(1)
+	return args.Get(0).(*StravaAthleteWithZones), args.Error(1)
+}
+
+func (m *MockStravaService) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
+	args := m.Called(user)
+	return args.Get(0).(*StravaAthleteZones), args.Error(1)
 }
 
 func (m *MockStravaService) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
@@ -846,9 +851,19 @@ func (m *MockStravaService) GetActivityDetail(user *models.User, activityID int6
 	return args.Get(0).(*StravaActivityDetail), args.Error(1)
 }
 
+func (m *MockStravaService) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
+	args := m.Called(user, activityID)
+	return args.Get(0).(*StravaActivityDetailWithZones), args.Error(1)
+}
+
 func (m *MockStravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
 	args := m.Called(user, activityID, streamTypes, resolution)
 	return args.Get(0).(*StravaStreams), args.Error(1)
+}
+
+func (m *MockStravaService) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
+	args := m.Called(user, activityID)
+	return args.Get(0).(*StravaActivityZones), args.Error(1)
 }
 
 func (m *MockStravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {

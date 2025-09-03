@@ -14,13 +14,13 @@ graph TB
     B --> C[PostgreSQL Database]
     B --> D[Strava API]
     B --> E[OpenAI API]
-    
+
     subgraph "Frontend Components"
         F[Landing Page]
         G[Chat Interface]
         H[Session Sidebar]
     end
-    
+
     subgraph "Backend Services"
         I[Auth Service]
         J[Chat Service]
@@ -28,7 +28,7 @@ graph TB
         L[AI Service]
         M[Logbook Service]
     end
-    
+
     A --> F
     A --> G
     A --> H
@@ -42,6 +42,7 @@ graph TB
 ### Technology Stack
 
 **Frontend:**
+
 - React 18 with TypeScript
 - Vite for build tooling
 - Tailwind CSS for styling
@@ -50,6 +51,7 @@ graph TB
 - Markdown rendering library (react-markdown)
 
 **Backend:**
+
 - Go 1.21+
 - Gin web framework
 - PostgreSQL with pgx driver
@@ -63,15 +65,17 @@ graph TB
 ### Frontend Components
 
 #### 1. Landing Page Component
+
 - **Purpose:** Welcome users and initiate Strava OAuth
 - **Props:** None
 - **State:** Loading states, error handling
-- **Features:** 
+- **Features:**
   - Disclaimer display
   - Prominent Strava connect button
   - Responsive design
 
 #### 2. Chat Interface Component
+
 - **Purpose:** Main coaching interaction area
 - **Props:** sessionId, user context
 - **State:** Messages, input text, streaming status
@@ -84,6 +88,7 @@ graph TB
   - Header with logout button for easy session termination
 
 #### 3. Session Sidebar Component
+
 - **Purpose:** Navigation between conversation sessions
 - **Props:** userId, currentSessionId
 - **State:** Session list, loading states
@@ -104,6 +109,7 @@ graph TB
 **Logbook Service:** Athlete profile management, training insights storage, and logbook updates
 
 #### 1. Authentication Service
+
 ```go
 type AuthService interface {
     HandleStravaOAuth(code string) (*User, error)
@@ -114,6 +120,7 @@ type AuthService interface {
 ```
 
 #### 2. Chat Service
+
 ```go
 type ChatService interface {
     CreateSession(userID string) (*Session, error)
@@ -124,21 +131,25 @@ type ChatService interface {
 ```
 
 #### 3. Strava Service
+
 ```go
 type StravaService interface {
     // Core Strava API interactions with automatic token refresh
-    GetAthleteProfile(user *User) (*StravaAthlete, error)
+    GetAthleteProfile(user *User) (*StravaAthleteWithZones, error)
     GetActivities(user *User, params ActivityParams) ([]*StravaActivity, error)
-    GetActivityDetail(user *User, activityID int64) (*StravaActivityDetail, error)
+    GetActivityDetail(user *User, activityID int64) (*StravaActivityDetailWithZones, error)
     GetActivityStreams(user *User, activityID int64, streamTypes []string) (*StravaStreams, error)
     RefreshToken(refreshToken string) (*TokenResponse, error)
-    
-    // Internal method for handling token refresh automatically
+
+    // Internal methods for zone data integration
+    getAthleteZones(user *User) (*StravaAthleteZones, error)
+    getActivityZones(user *User, activityID int64) (*StravaActivityZones, error)
     executeWithTokenRefresh(user *User, apiCall func(string) (interface{}, error)) (interface{}, error)
 }
 ```
 
 #### 4. AI Service
+
 ```go
 type AIService interface {
     // Core AI interaction - processes user messages and streams responses
@@ -161,6 +172,7 @@ type MessageContext struct {
 ```
 
 #### 5. Logbook Service
+
 ```go
 type LogbookService interface {
     // Athlete logbook management
@@ -175,6 +187,7 @@ type LogbookService interface {
 ### Core Entities
 
 #### User
+
 ```go
 type User struct {
     ID           string    `json:"id" db:"id"`
@@ -190,6 +203,7 @@ type User struct {
 ```
 
 #### Session
+
 ```go
 type Session struct {
     ID        string    `json:"id" db:"id"`
@@ -201,6 +215,7 @@ type Session struct {
 ```
 
 #### Message
+
 ```go
 type Message struct {
     ID        string    `json:"id" db:"id"`
@@ -212,12 +227,66 @@ type Message struct {
 ```
 
 #### AthleteLogbook
+
 ```go
 type AthleteLogbook struct {
     ID        string    `json:"id" db:"id"`
     UserID    string    `json:"user_id" db:"user_id"`
     Content   string    `json:"content" db:"content"`
     UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+```
+
+#### Training Zone Models
+
+```go
+// Integrated athlete profile with zones
+type StravaAthleteWithZones struct {
+    *StravaAthlete
+    Zones *StravaAthleteZones `json:"zones,omitempty"`
+}
+
+// Integrated activity detail with zones
+type StravaActivityDetailWithZones struct {
+    *StravaActivityDetail
+    Zones *StravaActivityZones `json:"zones,omitempty"`
+}
+
+type StravaAthleteZones struct {
+    HeartRate *StravaZoneSet `json:"heart_rate,omitempty"`
+    Power     *StravaZoneSet `json:"power,omitempty"`
+    Pace      *StravaZoneSet `json:"pace,omitempty"`
+}
+
+type StravaZoneSet struct {
+    CustomZones   bool              `json:"custom_zones"`
+    Zones         []StravaZone      `json:"zones"`
+    ResourceState int               `json:"resource_state"`
+}
+
+type StravaZone struct {
+    Min int `json:"min"`
+    Max int `json:"max"`
+}
+
+type StravaActivityZones struct {
+    HeartRate *StravaZoneDistribution `json:"heart_rate,omitempty"`
+    Power     *StravaZoneDistribution `json:"power,omitempty"`
+    Pace      *StravaZoneDistribution `json:"pace,omitempty"`
+}
+
+type StravaZoneDistribution struct {
+    CustomZones   bool             `json:"custom_zones"`
+    Zones         []StravaZoneData `json:"distribution_buckets"`
+    Type          string           `json:"type"`
+    ResourceState int              `json:"resource_state"`
+    SensorBased   bool             `json:"sensor_based"`
+}
+
+type StravaZoneData struct {
+    Min  int `json:"min"`
+    Max  int `json:"max"`
+    Time float64 `json:"time"`
 }
 ```
 
@@ -267,44 +336,51 @@ CREATE TABLE athlete_logbooks (
 ## API Endpoints
 
 ### Authentication
+
 - `GET /auth/strava` - Initiate Strava OAuth
 - `GET /auth/callback` - Handle OAuth callback
 - `POST /auth/logout` - Logout user and clear session
 - `GET /auth/check` - Check authentication status and refresh tokens if needed
 
 ### Sessions
+
 - `GET /api/sessions` - Get user sessions
 - `POST /api/sessions` - Create new session
 - `GET /api/sessions/:id/messages` - Get session messages
 
 ### Chat
+
 - `POST /api/sessions/:id/messages` - Send message
 - `GET /api/sessions/:id/stream` - SSE endpoint for streaming responses
 
 ### AI Tools (OpenAI Function Calling)
 
 #### Strava Data Tools
-- `get-athlete-profile` - Fetch complete athlete profile data from Strava including zones, stats, and preferences
+
+- `get-athlete-profile` - Fetch complete athlete profile data from Strava including training zones (heart rate, power, pace), stats, and preferences
 - `get-recent-activities` - Fetches the most recent activities for the authenticated athlete (configurable count)
-- `get-activity-details` - Fetches detailed information about a specific activity using its ID
+- `get-activity-details` - Fetches detailed information about a specific activity including zone distribution data showing time spent in each training zone
 - `get-activity-streams` - Retrieves detailed time-series data streams from a Strava activity (heart rate, power, cadence, etc.)
 
 #### Logbook Management Tool
+
 - `update-athlete-logbook` - Update or create the athlete logbook with free-form string content structured by the LLM
 
 #### Multi-Turn Tool Execution
+
 The AI service supports iterative tool calling where each round of tool results can inform the next set of tool calls. This enables sophisticated analysis workflows such as:
 
-1. **Progressive Data Gathering:** Get athlete profile → Get recent activities → Get detailed streams for specific workouts
-2. **Contextual Analysis:** Analyze recent performance → Get historical data for comparison → Update logbook with insights
-3. **Adaptive Coaching:** Assess current fitness → Get relevant training data → Provide personalized recommendations
+1. **Progressive Data Gathering:** Get athlete profile (with zones) → Get recent activities → Get activity details (with zone distributions) for specific workouts
+2. **Zone-Based Analysis:** Analyze recent performance with integrated zone data → Assess training intensity distribution → Update logbook with zone insights
+3. **Adaptive Coaching:** Assess current fitness with zone context → Analyze zone-specific training data → Provide personalized zone-based recommendations
 
 #### Tool Implementation Details
+
 ```go
 type StravaTools struct {
-    GetAthleteProfile    func() (*AthleteProfile, error)
+    GetAthleteProfile    func() (*AthleteProfileWithZones, error)
     GetRecentActivities  func(perPage int) ([]*Activity, error)
-    GetActivityDetails   func(activityId int64) (*ActivityDetail, error)
+    GetActivityDetails   func(activityId int64) (*ActivityDetailWithZones, error)
     GetActivityStreams   func(id int64, types []string, resolution string) (*ActivityStreams, error)
 }
 
@@ -331,14 +407,14 @@ type IterativeProcessor struct {
 // 7. Stream progress updates at each step ("Analyzing activities...", "Getting detailed data...")
 
 // Example Multi-Turn Flow:
-// Round 1: AI calls get-athlete-profile, get-recent-activities
-// → Results show user is a runner with recent tempo runs
-// Round 2: AI calls get-activity-details for specific tempo runs
-// → Results show heart rate zones and pacing data
-// Round 3: AI calls get-activity-streams for detailed analysis
-// → Results show power/pace correlation
-// Round 4: AI calls update-athlete-logbook with insights
-// → Final response with comprehensive coaching advice
+// Round 1: AI calls get-athlete-profile (includes zones), get-recent-activities
+// → Results show user is a runner with HR zones configured and recent tempo runs
+// Round 2: AI calls get-activity-details (includes zone distributions) for specific tempo runs
+// → Results show heart rate zone distribution and time spent in each zone integrated with activity data
+// Round 3: AI calls get-activity-streams for detailed zone analysis
+// → Results show zone transitions and training intensity patterns
+// Round 4: AI calls update-athlete-logbook with zone-based training insights
+// → Final response with zone-specific coaching advice and training recommendations
 ```
 
 ## Multi-Turn Tool Calling Architecture
@@ -355,14 +431,14 @@ sequenceDiagram
 
     User->>AI: Send message
     AI->>AI: Generate initial response with tool calls
-    
+
     loop Iterative Tool Calls (max 5 rounds)
         AI->>Tools: Execute tool calls
         Tools->>Strava: Fetch data (if needed)
         Tools->>DB: Update logbook (if needed)
         Tools-->>AI: Return tool results
         AI->>AI: Process results & determine next actions
-        
+
         alt More tool calls needed
             AI->>AI: Generate additional tool calls
         else Analysis complete
@@ -374,18 +450,21 @@ sequenceDiagram
 ### Implementation Strategy
 
 **Iterative Context Management:**
+
 - Maintain conversation state across tool call rounds
 - Accumulate tool results for comprehensive analysis
 - Track tool call depth to prevent infinite loops
 - Stream progress updates during long analysis chains
 
 **Tool Call Orchestration:**
+
 - Maximum 5 rounds of tool calls per user message
 - Each round can contain multiple parallel tool calls
 - Results from previous rounds inform subsequent tool selection
 - Graceful degradation when tool calls fail mid-iteration
 
 **Progress Streaming:**
+
 - Stream intermediate updates like "Analyzing your recent activities..."
 - Provide context about what data is being gathered
 - Show progress through complex analysis workflows
@@ -394,6 +473,7 @@ sequenceDiagram
 ## Error Handling
 
 ### Frontend Error Handling
+
 - Network errors with retry mechanisms
 - Authentication failures with redirect to login
 - Streaming connection errors with reconnection
@@ -401,6 +481,7 @@ sequenceDiagram
 - Progress indication during multi-turn tool processing
 
 ### Backend Error Handling
+
 - Structured error responses with consistent format
 - Strava API rate limiting and token refresh
 - OpenAI API failures with fallback responses
@@ -410,6 +491,7 @@ sequenceDiagram
 - Partial result handling when some tool calls fail
 
 ### Error Response Format
+
 ```go
 type ErrorResponse struct {
     Error   string `json:"error"`
@@ -421,18 +503,21 @@ type ErrorResponse struct {
 ## Testing Strategy
 
 ### Frontend Testing
+
 - **Unit Tests:** Component logic, utility functions
 - **Integration Tests:** API integration, routing
 - **E2E Tests:** Critical user flows (OAuth, chat, session management)
 - **Tools:** Jest, React Testing Library, Playwright
 
 ### Backend Testing
+
 - **Unit Tests:** Service layer logic, data models
 - **Integration Tests:** Database operations, external API calls
 - **API Tests:** Endpoint behavior, authentication
 - **Tools:** Go testing package, testify, httptest
 
 ### Test Data Management
+
 - Mock Strava API responses for consistent testing
 - Test database with sample user data
 - AI service mocking for predictable responses
@@ -451,7 +536,7 @@ sequenceDiagram
 
     Frontend->>Backend: API request with user token
     Backend->>Strava: Make API call with stored token
-    
+
     alt API returns 401 (token expired)
         Backend->>Strava: Refresh token request
         Strava-->>Backend: New access token
@@ -466,6 +551,7 @@ sequenceDiagram
 ### Token Refresh Implementation Details
 
 **Reactive Refresh Strategy:**
+
 - Handle 401 errors from Strava API calls automatically
 - Attempt token refresh when authentication failures occur
 - Retry original request with new tokens
@@ -474,6 +560,7 @@ sequenceDiagram
 - Transparent to the user - they see a brief loading state during refresh
 
 **Frontend Logout Flow:**
+
 - Logout button in chat interface header
 - Clear JWT tokens from browser storage
 - Redirect to landing page
@@ -482,6 +569,7 @@ sequenceDiagram
 ## Security Considerations
 
 ### Authentication & Authorization
+
 - Secure storage of Strava tokens (encrypted at rest)
 - JWT tokens for session management
 - CORS configuration for frontend domain
@@ -489,6 +577,7 @@ sequenceDiagram
 - Automatic token refresh with secure retry logic
 
 ### Data Protection
+
 - User data encryption in database
 - Secure transmission (HTTPS only)
 - Automatic reactive token refresh mechanism for Strava API
@@ -496,6 +585,7 @@ sequenceDiagram
 - Secure logout with JWT token cleanup (preserves user data)
 
 ### AI Safety
+
 - Content filtering for inappropriate responses
 - Rate limiting on AI API calls
 - Fallback responses for AI service failures
@@ -504,18 +594,21 @@ sequenceDiagram
 ## Performance Considerations
 
 ### Frontend Optimization
+
 - Code splitting for route-based loading
 - Lazy loading of chat history
 - Optimistic UI updates for better UX
 - Efficient re-rendering with React.memo
 
 ### Backend Optimization
+
 - Database connection pooling
 - Caching of Strava data (with appropriate TTL)
 - Streaming responses to reduce perceived latency
 - Background token refresh jobs
 
 ### Scalability Considerations
+
 - Stateless backend design for horizontal scaling
 - Database indexing on frequently queried fields
 - CDN for static assets

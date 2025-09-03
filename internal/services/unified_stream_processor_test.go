@@ -11,7 +11,11 @@ import (
 
 type mockUnifiedStravaService struct{}
 
-func (m *mockUnifiedStravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
+func (m *mockUnifiedStravaService) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
+	return nil, nil
+}
+
+func (m *mockUnifiedStravaService) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
 	return nil, nil
 }
 
@@ -33,6 +37,23 @@ func (m *mockUnifiedStravaService) GetActivityDetail(user *models.User, activity
 	}, nil
 }
 
+func (m *mockUnifiedStravaService) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
+	return &StravaActivityDetailWithZones{
+		StravaActivityDetail: &StravaActivityDetail{
+			Laps: []StravaLap{
+				{
+					LapIndex:   0,
+					StartIndex: 0,
+					EndIndex:   100,
+					Distance:   1000,
+					ElapsedTime: 300,
+				},
+			},
+		},
+		Zones: nil, // No zones for this mock
+	}, nil
+}
+
 func (m *mockUnifiedStravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
 	// Return mock stream data
 	return &StravaStreams{
@@ -41,6 +62,10 @@ func (m *mockUnifiedStravaService) GetActivityStreams(user *models.User, activit
 		Watts:     []int{100, 110, 120, 130, 140, 150, 160, 170, 180, 190},
 		Distance:  []float64{0, 10, 20, 30, 40, 50, 60, 70, 80, 90},
 	}, nil
+}
+
+func (m *mockUnifiedStravaService) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
+	return nil, nil
 }
 
 func (m *mockUnifiedStravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {

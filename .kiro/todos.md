@@ -10,7 +10,14 @@ NOW
 - Tune system prompt
 - deploy
 
+BEFORE SUBMISSION
+- Make a demo video
+- Use openAI responses API, possibly create an abstraction to use other LLMs including local models
+- MCP server
+
+
 NEXT PRIORITY
+- Tool usage messages should not be part of conversation context
 
 - Include zones, gears with profile
 - Include splits, similar activities with activity details

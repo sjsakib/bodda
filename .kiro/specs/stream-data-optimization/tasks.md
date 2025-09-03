@@ -70,6 +70,7 @@
     - Write function to prepare stream data for AI summarization
     - Implement custom prompt handling for targeted summaries
     - Return raw AI summary output without additional formatting
+    - **Fix data preparation to include full stream data instead of just statistics**
     - _Requirements: 3.1, 3.2, 3.3_
 
   - [x] 4.2 Integrate with existing AI service

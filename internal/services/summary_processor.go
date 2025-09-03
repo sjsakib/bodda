@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
@@ -34,7 +35,7 @@ type summaryProcessor struct {
 func NewSummaryProcessor(client *openai.Client) SummaryProcessor {
 	return &summaryProcessor{
 		client: client,
-		model:  openai.GPT4oMini, // Use smaller, faster model for summarization
+		model:  openai.GPT4Dot1, // Use smaller, faster model for summarization
 	}
 }
 
@@ -85,6 +86,8 @@ Please analyze this data and provide insights based on the user's specific reque
 		Temperature: 0.3, // Lower temperature for more consistent, factual responses
 	}
 
+	slog.InfoContext(ctx, "Invoking LLM for stream summary", "message_len", len(userPrompt))
+
 	// Call OpenAI API
 	resp, err := sp.client.CreateChatCompletion(ctx, req)
 	if err != nil {
@@ -118,7 +121,7 @@ func (sp *summaryProcessor) PrepareStreamDataForSummarization(data *StravaStream
 	var builder strings.Builder
 
 	// Add metadata about the stream data
-	builder.WriteString("STREAM DATA SUMMARY:\n\n")
+	builder.WriteString("COMPLETE STREAM DATA:\n\n")
 
 	// Count total data points and duration
 	totalPoints := sp.countDataPoints(data)
@@ -133,76 +136,187 @@ func (sp *summaryProcessor) PrepareStreamDataForSummarization(data *StravaStream
 	streamTypes := sp.getAvailableStreamTypes(data)
 	builder.WriteString(fmt.Sprintf("Available streams: %s\n\n", strings.Join(streamTypes, ", ")))
 
-	// Add statistical summaries for each stream type
+	// Include the complete time-series data for detailed analysis
+	builder.WriteString("COMPLETE TIME-SERIES DATA:\n\n")
+
+	// Determine the maximum length for iteration
+	maxLen := sp.countDataPoints(data)
+
+	// Add header row
+	builder.WriteString("Time(s)")
+	if len(data.Distance) > 0 {
+		builder.WriteString("\tDistance(m)")
+	}
 	if len(data.Heartrate) > 0 {
-		builder.WriteString("HEART RATE DATA:\n")
-		sp.addStreamStatistics(&builder, "Heart Rate", data.Heartrate, "bpm")
+		builder.WriteString("\tHR(bpm)")
+	}
+	if len(data.Watts) > 0 {
+		builder.WriteString("\tPower(W)")
+	}
+	if len(data.VelocitySmooth) > 0 {
+		builder.WriteString("\tSpeed(m/s)")
+	}
+	if len(data.Cadence) > 0 {
+		builder.WriteString("\tCadence(rpm)")
+	}
+	if len(data.Altitude) > 0 {
+		builder.WriteString("\tAltitude(m)")
+	}
+	if len(data.Temp) > 0 {
+		builder.WriteString("\tTemp(°C)")
+	}
+	if len(data.GradeSmooth) > 0 {
+		builder.WriteString("\tGrade(%)")
+	}
+	if len(data.Moving) > 0 {
+		builder.WriteString("\tMoving")
+	}
+	builder.WriteString("\n")
+
+	// Add all data points
+	for i := 0; i < maxLen; i++ {
+		// Time (always present as it's the base for all streams)
+		if i < len(data.Time) {
+			builder.WriteString(fmt.Sprintf("%d", data.Time[i]))
+		} else {
+			builder.WriteString("0")
+		}
+
+		// Distance
+		if len(data.Distance) > 0 {
+			if i < len(data.Distance) {
+				builder.WriteString(fmt.Sprintf("\t%.2f", data.Distance[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Heart Rate
+		if len(data.Heartrate) > 0 {
+			if i < len(data.Heartrate) {
+				builder.WriteString(fmt.Sprintf("\t%d", data.Heartrate[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Power
+		if len(data.Watts) > 0 {
+			if i < len(data.Watts) {
+				builder.WriteString(fmt.Sprintf("\t%d", data.Watts[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Speed
+		if len(data.VelocitySmooth) > 0 {
+			if i < len(data.VelocitySmooth) {
+				builder.WriteString(fmt.Sprintf("\t%.2f", data.VelocitySmooth[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Cadence
+		if len(data.Cadence) > 0 {
+			if i < len(data.Cadence) {
+				builder.WriteString(fmt.Sprintf("\t%d", data.Cadence[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Altitude
+		if len(data.Altitude) > 0 {
+			if i < len(data.Altitude) {
+				builder.WriteString(fmt.Sprintf("\t%.1f", data.Altitude[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Temperature
+		if len(data.Temp) > 0 {
+			if i < len(data.Temp) {
+				builder.WriteString(fmt.Sprintf("\t%d", data.Temp[i]))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Grade
+		if len(data.GradeSmooth) > 0 {
+			if i < len(data.GradeSmooth) {
+				builder.WriteString(fmt.Sprintf("\t%.2f", data.GradeSmooth[i]*100))
+			} else {
+				builder.WriteString("\t0")
+			}
+		}
+
+		// Moving
+		if len(data.Moving) > 0 {
+			if i < len(data.Moving) {
+				if data.Moving[i] {
+					builder.WriteString("\ttrue")
+				} else {
+					builder.WriteString("\tfalse")
+				}
+			} else {
+				builder.WriteString("\tfalse")
+			}
+		}
+
 		builder.WriteString("\n")
+	}
+
+	// Add a summary section for quick reference
+	builder.WriteString("\nDATA SUMMARY:\n")
+
+	if len(data.Heartrate) > 0 {
+		min, max, avg := sp.calculateIntStats(data.Heartrate)
+		builder.WriteString(fmt.Sprintf("Heart Rate: %d-%d bpm (avg: %.1f bpm)\n", min, max, avg))
 	}
 
 	if len(data.Watts) > 0 {
-		builder.WriteString("POWER DATA:\n")
-		sp.addStreamStatistics(&builder, "Power", data.Watts, "watts")
-		builder.WriteString("\n")
+		min, max, avg := sp.calculateIntStats(data.Watts)
+		builder.WriteString(fmt.Sprintf("Power: %d-%d watts (avg: %.1f watts)\n", min, max, avg))
 	}
 
 	if len(data.VelocitySmooth) > 0 {
-		builder.WriteString("SPEED DATA:\n")
-		sp.addSpeedStatistics(&builder, data.VelocitySmooth)
-		builder.WriteString("\n")
+		min, max, avg := sp.calculateFloatStats(data.VelocitySmooth)
+		builder.WriteString(fmt.Sprintf("Speed: %.1f-%.1f km/h (avg: %.1f km/h)\n", min*3.6, max*3.6, avg*3.6))
 	}
 
 	if len(data.Cadence) > 0 {
-		builder.WriteString("CADENCE DATA:\n")
-		sp.addStreamStatistics(&builder, "Cadence", data.Cadence, "rpm")
-		builder.WriteString("\n")
+		min, max, avg := sp.calculateIntStats(data.Cadence)
+		builder.WriteString(fmt.Sprintf("Cadence: %d-%d rpm (avg: %.1f rpm)\n", min, max, avg))
 	}
 
 	if len(data.Altitude) > 0 {
-		builder.WriteString("ELEVATION DATA:\n")
-		sp.addElevationStatistics(&builder, data.Altitude)
-		builder.WriteString("\n")
+		min, max, avg := sp.calculateFloatStats(data.Altitude)
+		elevationGain := 0.0
+		for i := 1; i < len(data.Altitude); i++ {
+			diff := data.Altitude[i] - data.Altitude[i-1]
+			if diff > 0 {
+				elevationGain += diff
+			}
+		}
+		builder.WriteString(fmt.Sprintf("Elevation: %.1f-%.1fm (avg: %.1fm, gain: %.1fm)\n", min, max, avg, elevationGain))
 	}
 
-	if len(data.Temp) > 0 {
-		builder.WriteString("TEMPERATURE DATA:\n")
-		sp.addStreamStatistics(&builder, "Temperature", data.Temp, "°C")
-		builder.WriteString("\n")
-	}
+	final := builder.String()
 
-	if len(data.GradeSmooth) > 0 {
-		builder.WriteString("GRADE DATA:\n")
-		sp.addGradeStatistics(&builder, data.GradeSmooth)
-		builder.WriteString("\n")
-	}
+	slog.Info("Prepared complete stream data for AI summarization", "data_points", maxLen, "text_length", len(final))
 
-	if len(data.Moving) > 0 {
-		builder.WriteString("MOVING TIME DATA:\n")
-		sp.addMovingTimeStatistics(&builder, data.Moving)
-		builder.WriteString("\n")
-	}
-
-	if len(data.Distance) > 0 {
-		builder.WriteString("DISTANCE DATA:\n")
-		sp.addDistanceStatistics(&builder, data.Distance)
-		builder.WriteString("\n")
-	}
-
-	// Add sample data points for context (every 10% of the activity)
-	if len(data.Time) > 0 {
-		builder.WriteString("SAMPLE DATA POINTS:\n")
-		sp.addSampleDataPoints(&builder, data)
-		builder.WriteString("\n")
-	}
-
-	return builder.String(), nil
+	return final, nil
 }
 
 // Helper methods for data preparation
 
 func (sp *summaryProcessor) countDataPoints(data *StravaStreams) int {
 	maxPoints := 0
-	
+
 	if len(data.Time) > maxPoints {
 		maxPoints = len(data.Time)
 	}
@@ -236,13 +350,13 @@ func (sp *summaryProcessor) countDataPoints(data *StravaStreams) int {
 	if len(data.Latlng) > maxPoints {
 		maxPoints = len(data.Latlng)
 	}
-	
+
 	return maxPoints
 }
 
 func (sp *summaryProcessor) getAvailableStreamTypes(data *StravaStreams) []string {
 	var types []string
-	
+
 	if len(data.Time) > 0 {
 		types = append(types, "time")
 	}
@@ -276,7 +390,7 @@ func (sp *summaryProcessor) getAvailableStreamTypes(data *StravaStreams) []strin
 	if len(data.Latlng) > 0 {
 		types = append(types, "latlng")
 	}
-	
+
 	return types
 }
 
@@ -286,7 +400,7 @@ func (sp *summaryProcessor) addStreamStatistics(builder *strings.Builder, name s
 	}
 
 	min, max, avg := sp.calculateIntStats(data)
-	builder.WriteString(fmt.Sprintf("- %s: %d-%d %s (avg: %.1f %s, %d points)\n", 
+	builder.WriteString(fmt.Sprintf("- %s: %d-%d %s (avg: %.1f %s, %d points)\n",
 		name, min, max, unit, avg, unit, len(data)))
 }
 
@@ -300,8 +414,8 @@ func (sp *summaryProcessor) addSpeedStatistics(builder *strings.Builder, data []
 	minKmh := min * 3.6
 	maxKmh := max * 3.6
 	avgKmh := avg * 3.6
-	
-	builder.WriteString(fmt.Sprintf("- Speed: %.1f-%.1f km/h (avg: %.1f km/h, %d points)\n", 
+
+	builder.WriteString(fmt.Sprintf("- Speed: %.1f-%.1f km/h (avg: %.1f km/h, %d points)\n",
 		minKmh, maxKmh, avgKmh, len(data)))
 }
 
@@ -311,7 +425,7 @@ func (sp *summaryProcessor) addElevationStatistics(builder *strings.Builder, dat
 	}
 
 	min, max, avg := sp.calculateFloatStats(data)
-	
+
 	// Calculate elevation gain/loss
 	elevationGain := 0.0
 	elevationLoss := 0.0
@@ -323,8 +437,8 @@ func (sp *summaryProcessor) addElevationStatistics(builder *strings.Builder, dat
 			elevationLoss += -diff
 		}
 	}
-	
-	builder.WriteString(fmt.Sprintf("- Elevation: %.1f-%.1fm (avg: %.1fm, gain: %.1fm, loss: %.1fm, %d points)\n", 
+
+	builder.WriteString(fmt.Sprintf("- Elevation: %.1f-%.1fm (avg: %.1fm, gain: %.1fm, loss: %.1fm, %d points)\n",
 		min, max, avg, elevationGain, elevationLoss, len(data)))
 }
 
@@ -334,7 +448,7 @@ func (sp *summaryProcessor) addGradeStatistics(builder *strings.Builder, data []
 	}
 
 	min, max, avg := sp.calculateFloatStats(data)
-	builder.WriteString(fmt.Sprintf("- Grade: %.1f%%-%.1f%% (avg: %.1f%%, %d points)\n", 
+	builder.WriteString(fmt.Sprintf("- Grade: %.1f%%-%.1f%% (avg: %.1f%%, %d points)\n",
 		min*100, max*100, avg*100, len(data)))
 }
 
@@ -349,9 +463,9 @@ func (sp *summaryProcessor) addMovingTimeStatistics(builder *strings.Builder, da
 			movingCount++
 		}
 	}
-	
+
 	movingPercent := float64(movingCount) / float64(len(data)) * 100
-	builder.WriteString(fmt.Sprintf("- Moving time: %d/%d points (%.1f%% moving)\n", 
+	builder.WriteString(fmt.Sprintf("- Moving time: %d/%d points (%.1f%% moving)\n",
 		movingCount, len(data), movingPercent))
 }
 
@@ -361,7 +475,7 @@ func (sp *summaryProcessor) addDistanceStatistics(builder *strings.Builder, data
 	}
 
 	totalDistance := data[len(data)-1] - data[0]
-	builder.WriteString(fmt.Sprintf("- Distance: %.2fkm total (%d points)\n", 
+	builder.WriteString(fmt.Sprintf("- Distance: %.2fkm total (%d points)\n",
 		totalDistance/1000, len(data)))
 }
 
@@ -388,7 +502,7 @@ func (sp *summaryProcessor) addSampleDataPoints(builder *strings.Builder, data *
 		builder.WriteString(fmt.Sprintf("Time %ds: ", timeOffset))
 
 		values := []string{}
-		
+
 		if idx < len(data.Heartrate) && data.Heartrate[idx] > 0 {
 			values = append(values, fmt.Sprintf("HR %d", data.Heartrate[idx]))
 		}

@@ -250,7 +250,11 @@ func TestRateLimiterErrorHandling(t *testing.T) {
 
 type mockStravaService struct{}
 
-func (m *mockStravaService) GetAthleteProfile(user *models.User) (*StravaAthlete, error) {
+func (m *mockStravaService) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
+	return nil, ErrTokenExpired
+}
+
+func (m *mockStravaService) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
 	return nil, ErrTokenExpired
 }
 
@@ -262,8 +266,16 @@ func (m *mockStravaService) GetActivityDetail(user *models.User, activityID int6
 	return nil, ErrActivityNotFound
 }
 
+func (m *mockStravaService) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
+	return nil, ErrActivityNotFound
+}
+
 func (m *mockStravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
 	return nil, ErrServiceUnavailable
+}
+
+func (m *mockStravaService) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
+	return nil, ErrActivityNotFound
 }
 
 func (m *mockStravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {

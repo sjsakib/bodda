@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -86,7 +87,7 @@ var (
 type AIService interface {
 	ProcessMessage(ctx context.Context, msgCtx *MessageContext) (<-chan string, error)
 	ProcessMessageSync(ctx context.Context, msgCtx *MessageContext) (string, error)
-	
+
 	// Tool execution methods for the tool execution endpoint
 	ExecuteGetAthleteProfile(ctx context.Context, msgCtx *MessageContext) (string, error)
 	ExecuteGetRecentActivities(ctx context.Context, msgCtx *MessageContext, perPage int) (string, error)
@@ -325,9 +326,9 @@ func (s *aiService) getAvailableTools() []openai.Tool {
 						},
 						"processing_mode": map[string]interface{}{
 							"type":        "string",
-							"description": "How to process large datasets that exceed context limits",
-							"enum":        []string{"auto", "raw", "derived", "ai-summary"},
-							"default":     "auto",
+							"description": "How to process large datasets that exceed context limits.\n- ai-summary: summarizes the stream with a small LLM model, recommended mode",
+							"enum":        []string{"ai-summary"},
+							"default":     "ai-summary",
 						},
 						"page_number": map[string]interface{}{
 							"type":        "integer",
@@ -389,6 +390,13 @@ func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *It
 			Stream:   true,
 			// Temperature: 0.7,
 		}
+
+		messagesTotalLen := 0
+		for _, message := range redactedMessages {
+			messagesTotalLen += len(message.Content)
+		}
+
+		slog.InfoContext(ctx, "Calling LLM", "message_count", len(redactedMessages), "message_total_len", messagesTotalLen)
 
 		stream, err := s.client.CreateChatCompletionStream(ctx, req)
 		if err != nil {
@@ -619,6 +627,8 @@ func (s *aiService) getContextualProgressMessage(processor *IterativeProcessor, 
 			"Examining the details of your recent training sessions...",
 			"Getting a better understanding of your workout structure...",
 			"Reviewing the specifics of your training efforts...",
+			"Analyzing your training zones...",
+			"Reviewing zone distribution...",
 		})
 	}
 
@@ -946,7 +956,7 @@ func (s *aiService) executeTools(ctx context.Context, msgCtx *MessageContext, to
 					args.Resolution = "medium"
 				}
 				if args.ProcessingMode == "" {
-					args.ProcessingMode = "auto"
+					args.ProcessingMode = "ai-summary"
 				}
 				if args.PageNumber == 0 {
 					args.PageNumber = 1
@@ -1012,8 +1022,6 @@ func (s *aiService) executeGetAthleteProfile(ctx context.Context, msgCtx *Messag
 		return "", s.handleStravaError(err, "athlete profile")
 	}
 
-	fmt.Println(profile)
-
 	return s.formatter.FormatAthleteProfile(profile), nil
 }
 
@@ -1039,12 +1047,14 @@ func (s *aiService) executeGetActivityDetails(ctx context.Context, msgCtx *Messa
 		return "", fmt.Errorf("user context is required")
 	}
 
-	details, err := s.stravaService.GetActivityDetail(msgCtx.User, activityID)
+	// Use the integrated method to get activity details with zones
+	detailsWithZones, err := s.stravaService.GetActivityDetailWithZones(msgCtx.User, activityID)
 	if err != nil {
 		return "", s.handleStravaError(err, "activity details")
 	}
 
-	return s.formatter.FormatActivityDetails(details), nil
+	// Format the integrated activity details and zones data
+	return s.formatter.FormatActivityDetailsWithZones(detailsWithZones), nil
 }
 
 func (s *aiService) executeGetActivityStreams(ctx context.Context, msgCtx *MessageContext, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
@@ -1288,6 +1298,7 @@ func (s *aiService) handleStravaError(err error, operation string) error {
 		return fmt.Errorf("unable to retrieve %s from Strava: %v", operation, err)
 	}
 }
+
 // Exported tool execution methods for the tool execution endpoint
 
 // ExecuteGetAthleteProfile executes the get-athlete-profile tool
@@ -1308,13 +1319,13 @@ func (s *aiService) ExecuteGetActivityDetails(ctx context.Context, msgCtx *Messa
 // ExecuteGetActivityStreams executes the get-activity-streams tool
 func (s *aiService) ExecuteGetActivityStreams(ctx context.Context, msgCtx *MessageContext, activityID int64, streamTypes []string, resolution string, processingMode string, pageNumber int, pageSize int, summaryPrompt string) (string, error) {
 	// Handle different processing modes
-	if processingMode == "auto" || processingMode == "summary" || processingMode == "detailed" || processingMode == "paginated" {
+	if processingMode == "auto" || processingMode == "summary" || processingMode == "detailed" || processingMode == "paginated" || processingMode == "ai-summary" || processingMode == "raw" || processingMode == "derived" {
 		// Use the processing version
 		result, err := s.executeGetActivityStreamsWithProcessing(ctx, msgCtx, activityID, streamTypes, resolution, processingMode, pageNumber, pageSize, summaryPrompt)
 		if err != nil {
 			return "", err
 		}
-		
+
 		// Return the content from the processed result
 		return result.Content, nil
 	} else {
@@ -1323,9 +1334,9 @@ func (s *aiService) ExecuteGetActivityStreams(ctx context.Context, msgCtx *Messa
 		if err != nil {
 			return "", err
 		}
-		
-		// Convert streams to string format
-		return fmt.Sprintf("Stream data retrieved: %v", streams), nil
+
+		// Convert streams to string format using proper formatter
+		return s.formatter.FormatStreamData(streams, "raw"), nil
 	}
 }
 
@@ -1335,7 +1346,7 @@ func (s *aiService) ExecuteUpdateAthleteLogbook(ctx context.Context, msgCtx *Mes
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Return a success message with the updated content
 	return fmt.Sprintf("Logbook updated successfully. Content: %s", logbook.Content), nil
 }
