@@ -501,11 +501,11 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 	// Standard splits section
 	if len(details.SplitsStandard) > 0 {
 		builder.WriteString("\n📏 **Standard Splits:**\n")
-		for i, split := range details.SplitsStandard {
-			if i >= 5 { // Limit to first 5 splits for readability
-				builder.WriteString(fmt.Sprintf("- ... and %d more splits\n", len(details.SplitsStandard)-5))
-				break
-			}
+		for _, split := range details.SplitsStandard {
+			// if i >= 5 { // Limit to first 5 splits for readability
+			// 	builder.WriteString(fmt.Sprintf("- ... and %d more splits\n", len(details.SplitsStandard)-5))
+			// 	break
+			// }
 			builder.WriteString(fmt.Sprintf("- **Split %d:** %s", split.Split, f.formatDuration(split.ElapsedTime)))
 			if split.Distance > 0 {
 				builder.WriteString(fmt.Sprintf(" | %s", f.formatDistance(split.Distance)))
@@ -538,11 +538,11 @@ func (f *outputFormatter) FormatActivityDetails(details *StravaActivityDetail) s
 	// Laps section
 	if len(details.Laps) > 0 {
 		builder.WriteString("\n🔄 **Laps:**\n")
-		for i, lap := range details.Laps {
-			if i >= 5 { // Limit to first 5 laps for readability
-				builder.WriteString(fmt.Sprintf("- ... and %d more laps\n", len(details.Laps)-5))
-				break
-			}
+		for _, lap := range details.Laps {
+			// if i >= 5 { // Limit to first 5 laps for readability
+			// 	builder.WriteString(fmt.Sprintf("- ... and %d more laps\n", len(details.Laps)-5))
+			// 	break
+			// }
 			builder.WriteString(fmt.Sprintf("- **Lap %d:** %s", lap.LapIndex, f.formatDuration(lap.ElapsedTime)))
 			if lap.Distance > 0 {
 				builder.WriteString(fmt.Sprintf(" (%s)", f.formatDistance(lap.Distance)))

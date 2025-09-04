@@ -35,7 +35,7 @@ type summaryProcessor struct {
 func NewSummaryProcessor(client *openai.Client) SummaryProcessor {
 	return &summaryProcessor{
 		client: client,
-		model:  openai.GPT4Dot1, // Use smaller, faster model for summarization
+		model:  openai.GPT5Nano, // Use smaller, faster model for summarization
 	}
 }
 
