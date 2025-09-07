@@ -334,3 +334,4 @@ func (m *mockAIServiceForRegistry) ExecuteGetActivityStreams(ctx context.Context
 func (m *mockAIServiceForRegistry) ExecuteUpdateAthleteLogbook(ctx context.Context, msgCtx *MessageContext, content string) (string, error) {
 	return "mock logbook update", nil
 }
+

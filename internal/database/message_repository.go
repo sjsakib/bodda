@@ -19,14 +19,15 @@ func NewMessageRepository(db *pgxpool.Pool) *MessageRepository {
 
 func (r *MessageRepository) Create(ctx context.Context, message *models.Message) error {
 	query := `
-		INSERT INTO messages (session_id, role, content)
-		VALUES ($1, $2, $3)
+		INSERT INTO messages (session_id, role, content, response_id)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, created_at`
 
 	err := r.db.QueryRow(ctx, query,
 		message.SessionID,
 		message.Role,
 		message.Content,
+		message.ResponseID,
 	).Scan(&message.ID, &message.CreatedAt)
 
 	if err != nil {
@@ -39,7 +40,7 @@ func (r *MessageRepository) Create(ctx context.Context, message *models.Message)
 func (r *MessageRepository) GetByID(ctx context.Context, id string) (*models.Message, error) {
 	message := &models.Message{}
 	query := `
-		SELECT id, session_id, role, content, created_at
+		SELECT id, session_id, role, content, response_id, created_at
 		FROM messages WHERE id = $1`
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
@@ -47,6 +48,7 @@ func (r *MessageRepository) GetByID(ctx context.Context, id string) (*models.Mes
 		&message.SessionID,
 		&message.Role,
 		&message.Content,
+		&message.ResponseID,
 		&message.CreatedAt,
 	)
 
@@ -62,7 +64,7 @@ func (r *MessageRepository) GetByID(ctx context.Context, id string) (*models.Mes
 
 func (r *MessageRepository) GetBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	query := `
-		SELECT id, session_id, role, content, created_at
+		SELECT id, session_id, role, content, response_id, created_at
 		FROM messages 
 		WHERE session_id = $1 
 		ORDER BY created_at ASC`
@@ -81,6 +83,7 @@ func (r *MessageRepository) GetBySessionID(ctx context.Context, sessionID string
 			&message.SessionID,
 			&message.Role,
 			&message.Content,
+			&message.ResponseID,
 			&message.CreatedAt,
 		)
 		if err != nil {
@@ -98,7 +101,7 @@ func (r *MessageRepository) GetBySessionID(ctx context.Context, sessionID string
 
 func (r *MessageRepository) GetBySessionIDWithLimit(ctx context.Context, sessionID string, limit int) ([]*models.Message, error) {
 	query := `
-		SELECT id, session_id, role, content, created_at
+		SELECT id, session_id, role, content, response_id, created_at
 		FROM messages 
 		WHERE session_id = $1 
 		ORDER BY created_at DESC
@@ -118,6 +121,7 @@ func (r *MessageRepository) GetBySessionIDWithLimit(ctx context.Context, session
 			&message.SessionID,
 			&message.Role,
 			&message.Content,
+			&message.ResponseID,
 			&message.CreatedAt,
 		)
 		if err != nil {
@@ -140,7 +144,7 @@ func (r *MessageRepository) GetBySessionIDWithLimit(ctx context.Context, session
 
 func (r *MessageRepository) GetBySessionIDWithPagination(ctx context.Context, sessionID string, limit, offset int) ([]*models.Message, error) {
 	query := `
-		SELECT id, session_id, role, content, created_at
+		SELECT id, session_id, role, content, response_id, created_at
 		FROM messages 
 		WHERE session_id = $1 
 		ORDER BY created_at ASC
@@ -160,6 +164,7 @@ func (r *MessageRepository) GetBySessionIDWithPagination(ctx context.Context, se
 			&message.SessionID,
 			&message.Role,
 			&message.Content,
+			&message.ResponseID,
 			&message.CreatedAt,
 		)
 		if err != nil {

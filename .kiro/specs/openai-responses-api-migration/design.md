@@ -2,27 +2,34 @@
 
 ## Overview
 
-This design outlines the migration from OpenAI's completion API (`CreateChatCompletionStream`) to the responses API pattern. The OpenAI Go SDK v1.41.1 supports both patterns, but the responses API provides better error handling, more consistent streaming behavior, and access to newer OpenAI features.
+This design outlines the migration from OpenAI's Chat Completions API to the Responses API by replacing the third-party SDK (`github.com/sashabaranov/go-openai`) with OpenAI's official SDK (`github.com/openai/openai-go`). The Responses API provides enhanced error handling, better streaming capabilities, access to advanced features like reasoning and computer use, and future-proof architecture.
 
-The migration will focus on updating the AI service implementation while maintaining the existing interface and functionality for seamless integration with the rest of the application.
+The migration involves both SDK replacement and API pattern changes while maintaining the existing interface and functionality for seamless integration with the rest of the application.
 
 ## Architecture
 
 ### Current Architecture
 
 The current implementation uses:
-- `openai.Client.CreateChatCompletionStream()` for streaming responses
-- `openai.ChatCompletionRequest` for request configuration
-- Manual stream processing with `stream.Recv()` loops
-- Custom error handling for streaming errors
+
+- **Third-party SDK**: `github.com/sashabaranov/go-openai v1.41.1`
+- **API**: Chat Completions API (`/v1/chat/completions`)
+- **Streaming**: `openai.Client.CreateChatCompletionStream()`
+- **Request Type**: `openai.ChatCompletionRequest`
+- **Response Processing**: Manual delta processing with `stream.Recv()` loops
+- **Error Handling**: Basic HTTP error handling
 
 ### Target Architecture
 
 The new implementation will use:
-- OpenAI responses API pattern with structured response handling
-- Improved streaming with better error recovery
-- Enhanced tool call processing with responses API
-- Standardized error handling patterns
+
+- **Official SDK**: `github.com/openai/openai-go v1.12.0`
+- **API**: Responses API (`/v1/responses`)
+- **Streaming**: `client.Responses.NewStreaming()`
+- **Request Type**: `responses.ResponseNewParams`
+- **Response Processing**: Event-based processing with `ResponseStreamEventUnion`
+- **Error Handling**: Enhanced error categorization and recovery
+- **Advanced Features**: Access to reasoning, computer use, and future capabilities
 
 ## Components and Interfaces
 
@@ -43,44 +50,113 @@ type AIService interface {
 #### 1. AI Service Implementation (`aiService`)
 
 **Current Structure:**
+
 ```go
+import "github.com/sashabaranov/go-openai"
+
 type aiService struct {
-    client *openai.Client
+    client *openai.Client  // Third-party SDK client
     // ... other fields
 }
 ```
 
-**Updated Structure:**
-- Same struct, but methods will use responses API patterns
-- Enhanced error handling with responses API error types
-- Improved streaming logic with responses API
+**Intermediate Structure (Parallel Implementation):**
 
-#### 2. Streaming Response Handler
-
-**Current Pattern:**
 ```go
-stream, err := s.client.CreateChatCompletionStream(ctx, req)
-for {
-    response, err := stream.Recv()
-    // Manual processing
+import (
+    sashabaranov "github.com/sashabaranov/go-openai"
+    openai "github.com/openai/openai-go"
+)
+
+type aiService struct {
+    legacyClient   *sashabaranov.Client  // Existing third-party SDK client
+    officialClient *openai.Client       // New official SDK client
+    useResponsesAPI bool                 // Feature flag
+    // ... other fields (unchanged)
 }
 ```
 
-**New Pattern:**
+**Final Structure:**
+
 ```go
-// Use responses API with structured response handling
-// Enhanced streaming with better error recovery
-// Improved tool call processing
+import "github.com/openai/openai-go"
+
+type aiService struct {
+    client *openai.Client  // Official OpenAI SDK client only
+    // ... other fields (unchanged)
+}
+```
+
+**Key Changes:**
+
+- Add official SDK alongside existing SDK (parallel implementation)
+- Implement feature flag to switch between implementations
+- Gradually migrate methods to use Responses API
+- Remove third-party SDK only after full validation
+
+#### 2. Streaming Response Handler
+
+**Current Pattern (Chat Completions API):**
+
+```go
+// Third-party SDK with Chat Completions API
+req := openai.ChatCompletionRequest{
+    Model: openai.GPT4,
+    Messages: messages,
+    Tools: tools,
+    Stream: true,
+}
+stream, err := s.client.CreateChatCompletionStream(ctx, req)
+for {
+    response, err := stream.Recv()
+    if err != nil {
+        if err == io.EOF {
+            break
+        }
+        return err
+    }
+    delta := response.Choices[0].Delta
+    // Process delta content and tool calls
+}
+```
+
+**New Pattern (Responses API):**
+
+```go
+// Official SDK with Responses API
+params := responses.ResponseNewParams{
+    Model: responses.ResponsesModelO1Pro,
+    Input: []responses.ResponseInputItemUnionParam{
+        responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser),
+    },
+    Tools: tools,
+}
+stream := s.client.Responses.NewStreaming(ctx, params)
+for stream.Next() {
+    event := stream.Current()
+    switch event := event.(type) {
+    case responses.ResponseTextDeltaEvent:
+        // Handle text content
+        responseChan <- event.Delta
+    case responses.ResponseFunctionCallArgumentsDeltaEvent:
+        // Handle tool call arguments
+    case responses.ResponseCompletedEvent:
+        // Handle completion
+        break
+    }
+}
 ```
 
 #### 3. Tool Call Processing
 
 **Current Implementation:**
+
 - Manual parsing of tool calls from streaming deltas
 - Custom tool call accumulation logic
 - Basic error recovery
 
 **Enhanced Implementation:**
+
 - Structured tool call handling with responses API
 - Better error handling and recovery
 - Better tool call state management
@@ -89,24 +165,46 @@ for {
 
 ### Request/Response Models
 
-The migration will update how we interact with OpenAI models while maintaining the same data flow:
+The migration will replace third-party SDK models with official SDK models:
 
-#### Current Models Used:
-- `openai.ChatCompletionRequest`
-- `openai.ChatCompletionMessage`
-- `openai.ToolCall`
-- `openai.Tool`
+#### Current Models (Third-party SDK):
 
-#### Updated Usage:
-- Same models but used with responses API patterns
-- Enhanced error handling structures
-- Improved streaming response types
+```go
+// github.com/sashabaranov/go-openai
+openai.ChatCompletionRequest
+openai.ChatCompletionMessage
+openai.ChatCompletionStreamResponse
+openai.ToolCall
+openai.Tool
+```
+
+#### New Models (Official SDK):
+
+```go
+// github.com/openai/openai-go
+responses.ResponseNewParams
+responses.ResponseInputItemUnionParam
+responses.ResponseStreamEventUnion
+responses.ResponseFunctionToolCall
+responses.ToolUnionParam
+```
+
+#### Model Mapping:
+
+| Current (Third-party)          | New (Official)                | Purpose                  |
+| ------------------------------ | ----------------------------- | ------------------------ |
+| `ChatCompletionRequest`        | `ResponseNewParams`           | Request configuration    |
+| `ChatCompletionMessage`        | `ResponseInputItemUnionParam` | Input messages           |
+| `ChatCompletionStreamResponse` | `ResponseStreamEventUnion`    | Streaming events         |
+| `ToolCall`                     | `ResponseFunctionToolCall`    | Tool call representation |
+| `Tool`                         | `ToolUnionParam`              | Tool definitions         |
 
 ### Internal Data Models
 
 No changes to internal models:
+
 - `MessageContext` - remains unchanged
-- `ToolResult` - remains unchanged  
+- `ToolResult` - remains unchanged
 - `IterativeProcessor` - enhanced but interface unchanged
 
 ## Error Handling
@@ -169,29 +267,44 @@ func TestAIService_ErrorHandling_ResponsesAPI(t *testing.T) {
 
 ## Implementation Phases
 
-### Phase 1: Core Migration
-- Update streaming logic to use responses API
+### Phase 1: Parallel SDK Addition
+
+- Add `github.com/openai/openai-go` alongside existing `github.com/sashabaranov/go-openai`
+- Create new client initialization for official SDK
 - Maintain existing functionality and interface
-- Basic error handling migration
+- Ensure compilation continues to work
 
-### Phase 2: Enhanced Features
-- Improved error handling and recovery
-- Enhanced tool call processing
-- Better streaming performance
+### Phase 2: Responses API Implementation
 
-### Phase 3: Optimization
-- Performance optimizations
-- Advanced error recovery
-- Monitoring and observability improvements
+- Implement new methods using Responses API alongside existing Chat Completions methods
+- Create event-based streaming processing in parallel to delta-based processing
+- Implement new tool call handling for event structure
+- Add feature flag to switch between implementations
+
+### Phase 3: Testing and Validation
+
+- Comprehensive testing of both implementations side-by-side
+- Performance comparison and validation
+- Feature parity verification
+- Gradual rollout with monitoring
+
+### Phase 4: Migration Completion
+
+- Switch default implementation to Responses API
+- Remove third-party SDK dependency
+- Clean up old implementation code
+- Documentation and knowledge transfer
 
 ## Migration Strategy
 
 ### Approach
 
-1. **In-Place Migration**: Update existing `aiService` implementation
-2. **Interface Preservation**: Keep existing interfaces unchanged
-3. **Gradual Enhancement**: Implement improvements incrementally
-4. **Comprehensive Testing**: Validate each change thoroughly
+1. **Parallel Implementation**: Add official SDK alongside existing third-party SDK
+2. **Gradual Migration**: Implement Responses API methods while keeping existing ones
+3. **Interface Preservation**: Keep existing `AIService` interface unchanged
+4. **Feature Flag**: Use configuration to switch between implementations
+5. **Comprehensive Testing**: Validate functionality parity before switching
+6. **Clean Removal**: Remove third-party SDK only after full validation
 
 ### Rollback Plan
 
@@ -203,16 +316,19 @@ func TestAIService_ErrorHandling_ResponsesAPI(t *testing.T) {
 ## Performance Considerations
 
 ### Streaming Performance
+
 - Responses API may have different streaming characteristics
 - Monitor latency and throughput during migration
 - Optimize buffer sizes and processing patterns
 
 ### Memory Usage
+
 - Responses API may have different memory patterns
 - Monitor memory usage during streaming
 - Optimize tool call accumulation and processing
 
 ### Error Recovery
+
 - Improved error recovery may reduce failed requests
 - Better error handling should improve success rates
 - Monitor error rates and recovery effectiveness
@@ -220,11 +336,13 @@ func TestAIService_ErrorHandling_ResponsesAPI(t *testing.T) {
 ## Security Considerations
 
 ### API Key Management
+
 - Same OpenAI API key configuration
 - No changes to authentication patterns
 - Maintain existing security practices
 
 ### Data Handling
+
 - Same data flow and processing patterns
 - No changes to data retention or logging
 - Maintain existing privacy protections
@@ -232,17 +350,20 @@ func TestAIService_ErrorHandling_ResponsesAPI(t *testing.T) {
 ## Monitoring and Observability
 
 ### Metrics to Track
+
 - Response latency and throughput
 - Error rates by category
 - Tool execution success rates
 - Streaming performance metrics
 
 ### Logging Enhancements
+
 - Structured logging with responses API context
 - Better error categorization in logs
 - Enhanced debugging information
 
 ### Alerting
+
 - Monitor for increased error rates
 - Alert on streaming performance degradation
 - Track tool execution failures

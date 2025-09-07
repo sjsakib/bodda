@@ -19,8 +19,11 @@ func TestToolExecutorIntegrationWithAIService(t *testing.T) {
 	mockStravaService := &mockStravaServiceForToolExecutor{}
 	mockLogbookService := &mockLogbookServiceForToolExecutor{}
 
+	// Create tool registry first
+	mockToolRegistry := NewToolRegistry()
+	
 	// Create AI service (this will use mock services)
-	aiService := NewAIService(cfg, mockStravaService, mockLogbookService)
+	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry)
 
 	// Create tool registry and executor
 	registry := NewToolRegistryWithAIService(aiService)

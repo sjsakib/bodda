@@ -84,6 +84,24 @@ func (m *mockUnifiedSummaryProcessor) GenerateSummary(ctx context.Context, data 
 	}, nil
 }
 
+func (m *mockUnifiedSummaryProcessor) GenerateSummaryWithResponsesAPI(ctx context.Context, data *StravaStreams, activityID int64, prompt string) (*StreamSummary, error) {
+	return &StreamSummary{
+		ActivityID:    activityID,
+		SummaryPrompt: prompt,
+		Summary:       "Mock unified summary with Responses API",
+		Model:         "mock-model-unified",
+	}, nil
+}
+
+func (m *mockUnifiedSummaryProcessor) ProcessStreamDataWithResponsesAPI(ctx context.Context, data *StravaStreams, activityID int64, prompt string) (*StreamSummary, error) {
+	return &StreamSummary{
+		ActivityID:    activityID,
+		SummaryPrompt: prompt,
+		Summary:       "Mock unified processed data with Responses API",
+		Model:         "mock-model-unified",
+	}, nil
+}
+
 func (m *mockUnifiedSummaryProcessor) PrepareStreamDataForSummarization(data *StravaStreams) (string, error) {
 	return "prepared data", nil
 }

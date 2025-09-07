@@ -135,9 +135,10 @@ func TestInputValidation(t *testing.T) {
 
 			// Create a mock AI service to test validation
 			cfg := &config.Config{OpenAIAPIKey: "test_key"}
-			mockStravaService := &mockStravaService{}
-			mockLogbookService := &mockLogbookService{}
-			aiService := NewAIService(cfg, mockStravaService, mockLogbookService).(*aiService)
+			mockStravaService := &mockStravaServiceBasic{}
+			mockLogbookService := &mockLogbookServiceBasic{}
+			mockToolRegistry := NewToolRegistry()
+			aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry).(*aiService)
 
 			err := aiService.validateMessageContext(msgCtx)
 
@@ -248,55 +249,55 @@ func TestRateLimiterErrorHandling(t *testing.T) {
 
 // Mock implementations for testing
 
-type mockStravaService struct{}
+type mockStravaServiceBasic struct{}
 
-func (m *mockStravaService) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
+func (m *mockStravaServiceBasic) GetAthleteProfile(user *models.User) (*StravaAthleteWithZones, error) {
 	return nil, ErrTokenExpired
 }
 
-func (m *mockStravaService) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
+func (m *mockStravaServiceBasic) GetAthleteZones(user *models.User) (*StravaAthleteZones, error) {
 	return nil, ErrTokenExpired
 }
 
-func (m *mockStravaService) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
+func (m *mockStravaServiceBasic) GetActivities(user *models.User, params ActivityParams) ([]*StravaActivity, error) {
 	return nil, ErrRateLimitExceeded
 }
 
-func (m *mockStravaService) GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error) {
+func (m *mockStravaServiceBasic) GetActivityDetail(user *models.User, activityID int64) (*StravaActivityDetail, error) {
 	return nil, ErrActivityNotFound
 }
 
-func (m *mockStravaService) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
+func (m *mockStravaServiceBasic) GetActivityDetailWithZones(user *models.User, activityID int64) (*StravaActivityDetailWithZones, error) {
 	return nil, ErrActivityNotFound
 }
 
-func (m *mockStravaService) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
+func (m *mockStravaServiceBasic) GetActivityStreams(user *models.User, activityID int64, streamTypes []string, resolution string) (*StravaStreams, error) {
 	return nil, ErrServiceUnavailable
 }
 
-func (m *mockStravaService) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
+func (m *mockStravaServiceBasic) GetActivityZones(user *models.User, activityID int64) (*StravaActivityZones, error) {
 	return nil, ErrActivityNotFound
 }
 
-func (m *mockStravaService) RefreshToken(refreshToken string) (*TokenResponse, error) {
+func (m *mockStravaServiceBasic) RefreshToken(refreshToken string) (*TokenResponse, error) {
 	return nil, ErrInvalidToken
 }
 
-type mockLogbookService struct{}
+type mockLogbookServiceBasic struct{}
 
-func (m *mockLogbookService) GetLogbook(ctx context.Context, userID string) (*models.AthleteLogbook, error) {
+func (m *mockLogbookServiceBasic) GetLogbook(ctx context.Context, userID string) (*models.AthleteLogbook, error) {
 	return nil, errors.New("logbook not found")
 }
 
-func (m *mockLogbookService) CreateInitialLogbook(ctx context.Context, userID string, athleteData *StravaAthlete) (*models.AthleteLogbook, error) {
+func (m *mockLogbookServiceBasic) CreateInitialLogbook(ctx context.Context, userID string, athleteData *StravaAthlete) (*models.AthleteLogbook, error) {
 	return nil, nil
 }
 
-func (m *mockLogbookService) UpdateLogbook(ctx context.Context, userID string, content string) (*models.AthleteLogbook, error) {
+func (m *mockLogbookServiceBasic) UpdateLogbook(ctx context.Context, userID string, content string) (*models.AthleteLogbook, error) {
 	return nil, nil
 }
 
-func (m *mockLogbookService) UpsertLogbook(ctx context.Context, userID, content string) (*models.AthleteLogbook, error) {
+func (m *mockLogbookServiceBasic) UpsertLogbook(ctx context.Context, userID, content string) (*models.AthleteLogbook, error) {
 	return nil, nil
 }
 

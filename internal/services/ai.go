@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"strings"
@@ -14,10 +13,12 @@ import (
 	"bodda/internal/config"
 	"bodda/internal/models"
 
-	"github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v2/option"
+	"github.com/openai/openai-go/v2/packages/param"
+	"github.com/openai/openai-go/v2/packages/ssestream"
+	"github.com/openai/openai-go/v2/responses"
 )
-
-const MODEL = openai.GPT5
 
 // MessageContext contains all the context needed for AI processing
 type MessageContext struct {
@@ -27,6 +28,7 @@ type MessageContext struct {
 	ConversationHistory []*models.Message
 	AthleteLogbook      *models.AthleteLogbook
 	User                *models.User
+	LastResponseID      string // OpenAI Response ID for multi-turn conversations
 }
 
 // ToolResult represents the result of a tool execution
@@ -39,12 +41,12 @@ type ToolResult struct {
 
 // IterativeProcessor manages multiple rounds of data analysis and tool execution
 type IterativeProcessor struct {
-	MaxRounds        int                            // Maximum tool call rounds (default: 5)
-	CurrentRound     int                            // Current analysis round
-	ProgressCallback func(string)                   // Stream progress updates
-	ToolResults      [][]ToolResult                 // Results from each round
-	Context          *MessageContext                // Persistent context
-	Messages         []openai.ChatCompletionMessage // Accumulated conversation context
+	MaxRounds        int                                     // Maximum tool call rounds (default: 5)
+	CurrentRound     int                                     // Current analysis round
+	ProgressCallback func(string)                            // Stream progress updates
+	ToolResults      [][]ToolResult                          // Results from each round
+	Context          *MessageContext                         // Persistent context
+	Messages         []responses.ResponseInputItemUnionParam // Accumulated conversation context
 }
 
 // NewIterativeProcessor creates a new iterative processor with default settings
@@ -55,7 +57,7 @@ func NewIterativeProcessor(msgCtx *MessageContext, progressCallback func(string)
 		ProgressCallback: progressCallback,
 		ToolResults:      make([][]ToolResult, 0),
 		Context:          msgCtx,
-		Messages:         make([]openai.ChatCompletionMessage, 0),
+		Messages:         make([]responses.ResponseInputItemUnionParam, 0),
 	}
 }
 
@@ -97,7 +99,7 @@ type AIService interface {
 }
 
 type aiService struct {
-	client               *openai.Client
+	client               openai.Client // Official OpenAI SDK client
 	stravaService        StravaService
 	logbookService       LogbookService
 	formatter            OutputFormatter
@@ -107,15 +109,17 @@ type aiService struct {
 	processingDispatcher ProcessingModeDispatcher
 	unifiedProcessor     *UnifiedStreamProcessor
 	contextManager       ContextManager
+	toolRegistry         ToolRegistry
 }
 
 // NewAIService creates a new AI service instance
-func NewAIService(cfg *config.Config, stravaService StravaService, logbookService LogbookService) AIService {
-	client := openai.NewClient(cfg.OpenAIAPIKey)
+func NewAIService(cfg *config.Config, stravaService StravaService, logbookService LogbookService, toolRegistry ToolRegistry) AIService {
+	// Initialize OpenAI client
+	client := openai.NewClient(option.WithAPIKey(cfg.OpenAIAPIKey))
 
 	// Create stream processing components
 	streamProcessor := NewStreamProcessor(cfg)
-	summaryProcessor := NewSummaryProcessor(client)
+	summaryProcessor := NewSummaryProcessor(&client)
 	processingDispatcher := NewProcessingModeDispatcher(streamProcessor, summaryProcessor)
 
 	// Create derived features processor and unified stream processor
@@ -139,6 +143,8 @@ func NewAIService(cfg *config.Config, stravaService StravaService, logbookServic
 	// Create context manager for stream output redaction
 	contextManager := NewContextManager(cfg.StreamProcessing.RedactionEnabled)
 
+	slog.Info("AI Service initialized with Responses API", "implementation", "responses_api")
+
 	return &aiService{
 		client:               client,
 		stravaService:        stravaService,
@@ -150,6 +156,7 @@ func NewAIService(cfg *config.Config, stravaService StravaService, logbookServic
 		processingDispatcher: processingDispatcher,
 		unifiedProcessor:     unifiedProcessor,
 		contextManager:       contextManager,
+		toolRegistry:         toolRegistry,
 	}
 }
 
@@ -170,10 +177,15 @@ func (s *aiService) ProcessMessage(ctx context.Context, msgCtx *MessageContext) 
 	go func() {
 		defer close(responseChan)
 
-		// Process message with iterative tool calling
-		err := s.processIterativeToolCalls(ctx, processor, responseChan)
+		slog.InfoContext(ctx, "Using Responses API implementation for message processing",
+			"user_id", msgCtx.UserID,
+			"session_id", msgCtx.SessionID,
+			"implementation", "responses_api")
+
+		err := s.processMessageWithResponsesAPI(ctx, processor, responseChan)
+
 		if err != nil {
-			aiErr := s.handleOpenAIError(err)
+			aiErr := s.handleResponsesAPIError(err)
 			if errors.Is(aiErr, ErrOpenAIUnavailable) {
 				message := s.getRandomMessage([]string{
 					"I'm having some difficulties right now. Please give me a moment and try your question again.",
@@ -214,9 +226,17 @@ func (s *aiService) ProcessMessageSync(ctx context.Context, msgCtx *MessageConte
 	// Process in a goroutine and collect all responses
 	go func() {
 		defer close(responseChan)
-		err := s.processIterativeToolCalls(ctx, processor, responseChan)
+
+		slog.InfoContext(ctx, "Using Responses API implementation for sync message processing",
+			"user_id", msgCtx.UserID,
+			"session_id", msgCtx.SessionID,
+			"implementation", "responses_api",
+			"processing_mode", "sync")
+
+		err := s.processMessageWithResponsesAPI(ctx, processor, responseChan)
+
 		if err != nil {
-			aiErr := s.handleOpenAIError(err)
+			aiErr := s.handleResponsesAPIError(err)
 			if errors.Is(aiErr, ErrOpenAIUnavailable) {
 				message := s.getRandomMessage([]string{
 					"I'm experiencing technical difficulties right now. Please try again in a moment.",
@@ -244,201 +264,116 @@ func (s *aiService) ProcessMessageSync(ctx context.Context, msgCtx *MessageConte
 }
 
 // getAvailableTools returns the OpenAI function definitions for available tools
-func (s *aiService) getAvailableTools() []openai.Tool {
-	return []openai.Tool{
-		{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        "get-athlete-profile",
-				Description: "Get the complete athlete profile from Strava including personal information, zones, and stats",
-				Parameters: map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-					"required":   []string{},
-				},
-			},
-		},
-		{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        "get-recent-activities",
-				Description: "Get the most recent activities for the athlete",
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"per_page": map[string]interface{}{
-							"type":        "integer",
-							"description": "Number of activities to retrieve (1-200, default 30)",
-							"minimum":     1,
-							"maximum":     200,
-						},
-					},
-					"required": []string{},
-				},
-			},
-		},
-		{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        "get-activity-details",
-				Description: "Get detailed information about a specific activity using its ID",
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"activity_id": map[string]interface{}{
-							"type":        "integer",
-							"description": "The Strava activity ID",
-						},
-					},
-					"required": []string{"activity_id"},
-				},
-			},
-		},
-		{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        "get-activity-streams",
-				Description: "Get time-series data streams from a Strava activity with processing options for large datasets",
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"activity_id": map[string]interface{}{
-							"type":        "integer",
-							"description": "The Strava activity ID",
-						},
-						"stream_types": map[string]interface{}{
-							"type":        "array",
-							"description": "Types of streams to retrieve",
-							"items": map[string]interface{}{
-								"type": "string",
-								"enum": []string{
-									"time", "distance", "latlng", "altitude", "velocity_smooth",
-									"heartrate", "cadence", "watts", "temp", "moving", "grade_smooth",
-								},
-							},
-							"default": []string{"time", "distance", "heartrate", "watts"},
-						},
-						"resolution": map[string]interface{}{
-							"type":        "string",
-							"description": "Resolution of the data",
-							"enum":        []string{"low", "medium", "high"},
-							"default":     "medium",
-						},
-						"processing_mode": map[string]interface{}{
-							"type":        "string",
-							"description": "How to process large datasets that exceed context limits.\n- ai-summary: summarizes the stream with a small LLM model, recommended mode",
-							"enum":        []string{"ai-summary"},
-							"default":     "ai-summary",
-						},
-						"page_number": map[string]interface{}{
-							"type":        "integer",
-							"description": "Page number for paginated processing (1-based)",
-							"minimum":     1,
-							"default":     1,
-						},
-						"page_size": map[string]interface{}{
-							"type":        "integer",
-							"description": "Number of data points per page. Use negative value to request full dataset (subject to context limits)",
-							"minimum":     -1,
-							"maximum":     5000,
-							"default":     1000,
-						},
-						"summary_prompt": map[string]interface{}{
-							"type":        "string",
-							"description": "Custom prompt for AI summarization mode (required when processing_mode is 'ai-summary')",
-						},
-					},
-					"required": []string{"activity_id"},
-				},
-			},
-		},
-		{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        "update-athlete-logbook",
-				Description: "Update or create the athlete logbook with free-form string content. You can structure the content however you want - as plain text, markdown, or any format that makes sense for organizing athlete information, training insights, goals, and coaching observations.",
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"content": map[string]interface{}{
-							"type":        "string",
-							"description": "The complete logbook content as a string. You can structure this however you want - include athlete profile, training data, goals, preferences, health metrics, equipment, coaching insights, observations, and recommendations. Use any format that makes sense (plain text, markdown, etc.).",
-						},
-					},
-					"required": []string{"content"},
-				},
-			},
-		},
+func (s *aiService) getAvailableTools() []responses.ToolUnionParam {
+	// Get tools from registry with error handling and fallback behavior
+	if s.toolRegistry == nil {
+		slog.Warn("Tool registry is not available, returning empty tool list")
+		return []responses.ToolUnionParam{}
 	}
+
+	registryTools := s.toolRegistry.GetAvailableTools()
+	if len(registryTools) == 0 {
+		slog.Warn("No tools available from registry, returning empty tool list")
+		return []responses.ToolUnionParam{}
+	}
+
+	// Convert registry tools to OpenAI format
+	openAITools := make([]responses.ToolUnionParam, 0, len(registryTools))
+	for _, tool := range registryTools {
+		convertedTool := s.convertToolDefinitionToOpenAI(tool)
+		openAITools = append(openAITools, convertedTool)
+		
+		slog.Debug("Converted tool from registry to OpenAI format", 
+			"tool_name", tool.Name,
+			"description", tool.Description)
+	}
+
+	slog.Info("Successfully loaded tools from registry", 
+		"tool_count", len(openAITools),
+		"implementation", "registry_based")
+
+	return openAITools
 }
 
-// processIterativeToolCalls handles multi-turn tool calling with progress streaming
-func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *IterativeProcessor, responseChan chan<- string) error {
+// convertToolDefinitionToOpenAI converts a models.ToolDefinition to OpenAI's responses.ToolUnionParam format
+func (s *aiService) convertToolDefinitionToOpenAI(tool models.ToolDefinition) responses.ToolUnionParam {
+	// Create a copy of the parameters to modify for OpenAI compatibility
+	params := make(map[string]interface{})
+	for k, v := range tool.Parameters {
+		params[k] = v
+	}
+	
+	// OpenAI requires ALL properties to be listed in the required array
+	// even if they're optional parameters with defaults
+	if properties, ok := params["properties"].(map[string]interface{}); ok && len(properties) > 0 {
+		allPropertyNames := make([]string, 0, len(properties))
+		for propName := range properties {
+			allPropertyNames = append(allPropertyNames, propName)
+		}
+		params["required"] = allPropertyNames
+	}
+	
+	return responses.ToolParamOfFunction(
+		tool.Name,
+		params,
+		true, // Enable strict mode for parameter validation
+	)
+}
+
+// processMessageWithResponsesAPI handles multi-turn tool calling using the Responses API
+func (s *aiService) processMessageWithResponsesAPI(ctx context.Context, processor *IterativeProcessor, responseChan chan<- string) error {
 	// Prepare initial messages with accumulated context
-	processor.Messages = s.buildConversationContext(processor.Context)
+	if len(processor.Messages) == 0 {
+		processor.Messages = s.buildConversationContextForResponsesAPI(processor.Context)
+	}
 	tools := s.getAvailableTools()
 
 	for {
 		// Apply context redaction before creating the request
-		redactedMessages := s.contextManager.RedactPreviousStreamOutputs(processor.Messages)
+		redactedMessages := processor.Messages
 
-		// Create chat completion request with enhanced context
-		req := openai.ChatCompletionRequest{
-			Model:    MODEL,
-			Messages: redactedMessages,
-			Tools:    tools,
-			Stream:   true,
-			// Temperature: 0.7,
+		// Use messages directly in Responses API format
+		inputItems := redactedMessages
+
+		// Create responses API request
+		params := responses.ResponseNewParams{
+			Model: responses.ChatModelGPT5,
+			Input: responses.ResponseNewParamsInputUnion{
+				OfInputItemList: inputItems,
+			},
+			Tools:              tools,
 		}
 
-		messagesTotalLen := 0
-		for _, message := range redactedMessages {
-			messagesTotalLen += len(message.Content)
+		// Check if we have a previous response ID to reference
+		if processor.Context.LastResponseID != "" {
+			slog.Info("Including previous response ID in request context",
+				"previous_response_id", processor.Context.LastResponseID)
+			// TODO: Add previous response ID to params when SDK supports it
+			// This might be a field like params.PreviousResponseID = processor.Context.LastResponseID
+			params.PreviousResponseID = param.NewOpt(processor.Context.LastResponseID)
 		}
 
-		slog.InfoContext(ctx, "Calling LLM", "message_count", len(redactedMessages), "message_total_len", messagesTotalLen)
+		slog.InfoContext(ctx, "Calling LLM with Responses API", "message_count", len(redactedMessages))
 
-		stream, err := s.client.CreateChatCompletionStream(ctx, req)
-		if err != nil {
-			return s.handleStreamingError(err, processor, responseChan)
-		}
+		stream := s.client.Responses.NewStreaming(ctx, params)
 
-		var toolCalls []openai.ToolCall
-		var currentToolCall *openai.ToolCall
 		var responseContent strings.Builder
 		var hasContent bool
+		var toolCalls []responses.ResponseFunctionToolCall
 
-		// Process streaming response with enhanced error handling
-		for {
-			response, err := stream.Recv()
-			if err != nil {
-				stream.Close()
-				if err == io.EOF {
-					break
-				}
-				return s.handleStreamingError(err, processor, responseChan)
-			}
-
-			if len(response.Choices) == 0 {
-				continue
-			}
-
-			delta := response.Choices[0].Delta
-
-			// Handle content streaming
-			if delta.Content != "" {
-				responseContent.WriteString(delta.Content)
-				responseChan <- delta.Content
-				hasContent = true
-			}
-
-			// Handle tool calls with improved parsing
-			if len(delta.ToolCalls) > 0 {
-				toolCalls = s.parseToolCallsFromDelta(delta.ToolCalls, toolCalls, &currentToolCall)
-			}
+		// Process streaming response with event-based processing
+		var responseID string
+		err := s.processResponsesAPIStreamWithID(stream, responseChan, &responseContent, &hasContent, &toolCalls, &responseID)
+		if err != nil {
+			return s.handleResponsesAPIError(err)
 		}
 
-		stream.Close()
+		// Store response ID for multi-turn conversations
+		if responseID != "" {
+			slog.Info("Captured response ID for multi-turn conversation", "response_id", responseID)
+			// Store this in the processor context for later use when saving the assistant message
+			processor.Context.LastResponseID = responseID
+		}
 
 		// Determine next action based on tool calls and analysis depth
 		if len(toolCalls) > 0 {
@@ -464,123 +399,810 @@ func (s *aiService) processIterativeToolCalls(ctx context.Context, processor *It
 			}
 
 			// Build enhanced conversation context with accumulated insights
+			// Use the proper function call output format with validated tool call IDs
 			processor = s.accumulateAnalysisContext(processor, toolCalls, toolResults, responseContent.String())
 
 			// Continue to next iteration with enhanced context
 			continue
 		}
 
-		// No tool calls, analysis complete
+		// No tool calls, analysis complete - log comprehensive summary
+		slog.Info("Message processing completed successfully with comprehensive call_id summary",
+			"implementation", "responses_api",
+			"feature_flag", "enabled",
+			"total_rounds", processor.CurrentRound,
+			"total_tool_calls", processor.GetTotalToolCalls(),
+			"final_message_count", len(processor.Messages),
+			"processing_mode", "complete")
 		break
 	}
 
 	return nil
 }
 
-// buildConversationContext creates enhanced conversation context with accumulated insights
-func (s *aiService) buildConversationContext(msgCtx *MessageContext) []openai.ChatCompletionMessage {
-	messages := []openai.ChatCompletionMessage{
-		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: s.buildEnhancedSystemPrompt(msgCtx),
-		},
-	}
+// buildConversationContextForResponsesAPI creates conversation context directly in Responses API format
+// Following OpenAI Responses API multi-turn pattern: include previous response ID instead of all messages
+func (s *aiService) buildConversationContextForResponsesAPI(msgCtx *MessageContext) []responses.ResponseInputItemUnionParam {
+	var inputItems []responses.ResponseInputItemUnionParam
 
-	// Add conversation history with context preservation
-	for _, msg := range msgCtx.ConversationHistory {
-		role := openai.ChatMessageRoleUser
-		if msg.Role == "assistant" {
-			role = openai.ChatMessageRoleAssistant
+	// Add system prompt as user message with system context
+	systemPrompt := s.buildEnhancedSystemPrompt(msgCtx)
+	inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(
+		fmt.Sprintf("System: %s", systemPrompt),
+		responses.EasyInputMessageRoleUser,
+	))
+
+	// For multi-turn conversations, use previous response ID instead of all messages
+	// This follows the OpenAI Responses API pattern for efficient multi-turn handling
+	if len(msgCtx.ConversationHistory) > 0 {
+		// Find the most recent assistant message with a response ID
+		var previousResponseID *string
+		for i := len(msgCtx.ConversationHistory) - 1; i >= 0; i-- {
+			msg := msgCtx.ConversationHistory[i]
+			if msg.Role == "assistant" && msg.ResponseID != nil && *msg.ResponseID != "" {
+				previousResponseID = msg.ResponseID
+				break
+			}
 		}
 
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    role,
-			Content: msg.Content,
-		})
+		// For now, include recent conversation history for context
+		// TODO: Implement proper previous response ID reference when SDK method is available
+		slog.Info("Including recent conversation history for context",
+			"conversation_length", len(msgCtx.ConversationHistory),
+			"has_previous_response_id", previousResponseID != nil)
+
+		// Include only the last few messages to maintain context
+		recentMessages := msgCtx.ConversationHistory
+		if len(recentMessages) > 4 { // Limit to last 4 messages for efficiency
+			recentMessages = recentMessages[len(recentMessages)-4:]
+		}
+
+		for _, msg := range recentMessages {
+			role := responses.EasyInputMessageRoleUser
+			if msg.Role == "assistant" {
+				role = responses.EasyInputMessageRoleAssistant
+			}
+
+			inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(
+				msg.Content,
+				role,
+			))
+		}
 	}
 
 	// Add current message with analysis context
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: msgCtx.Message,
-	})
+	inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(
+		msgCtx.Message,
+		responses.EasyInputMessageRoleUser,
+	))
 
-	return messages
+	return inputItems
 }
 
-var systemPrompt = `You are Bodda, an elite running and/or cycling coach mentoring an athlete with access to their Strava profile and all of their activities. Your responses should look and feel like it is coming from an elite professional coach.
+// processResponsesAPIStreamWithID processes the streaming response from Responses API using event-based processing and captures response ID
+func (s *aiService) processResponsesAPIStreamWithID(stream *ssestream.Stream[responses.ResponseStreamEventUnion], responseChan chan<- string, responseContent *strings.Builder, hasContent *bool, toolCalls *[]responses.ResponseFunctionToolCall, responseID *string) error {
+	defer stream.Close()
 
-When asked about any particular workout, provide a thorough, data-driven assessment, combining both quantitative insights and textual interpretation. Begin your report with a written summary that highlights key findings and context. Add clear coaching feedback and personalized training recommendations. These should be practical, actionable, and grounded solely in the data provided—no assumptions or fabrications. Do not hide or sugarcoat weakness.
+	// Initialize tool call state manager for proper accumulation across multiple events
+	toolCallState := NewToolCallState()
 
-LOGBOOK MANAGEMENT:
-- The logbook has NO predefined schema - you have complete freedom to structure it based on coaching best practices
-- If no logbook exists, use appropriate tools to get athlete's profile and recent activities to create one and then save it with the provided tool.
-- You should get last 30 activities for the logbook in addition to the athlete profile.
-- You can update the logbook profile section when you determine it needs fresh data from Strava
-- Whenever you think the logbook needs update, you should do it with the provided tool. It could be after analyzing an activity, providing suggestion, plan, athlete sharing their constraint, preference etc. All significant or useful info about the athlete should be in the logbook.
-- The logbook is stored using the athlete's Strava ID, ensuring their data persists across login sessions
-- Include the athlete's Strava ID and current timestamp in the logbook
+	// Process streaming events using stream.Next() and stream.Current() pattern
+	for stream.Next() {
+		event := stream.Current()
 
-COACHING APPROACH:
-- Use the logbook context to provide personalized coaching based on the athlete's complete history
-- Structure the logbook content however you think will be most effective for coaching
+		// Log event type for debugging with enhanced context
+		slog.Debug("Processing Responses API event", 
+			"event_type", event.Type,
+			"stream_position", "active",
+			"tool_calls_tracked", len(toolCallState.toolCalls))
 
-RESPONSE FORMAT:
-- Your response will be rendered as markdown, so feel free to format your response using markdown when appropriate.
+		switch event.Type {
+		case "response.output_text.delta":
+			// Handle text content deltas
+			textEvent := event.AsResponseOutputTextDelta()
+			if textEvent.Delta != "" {
+				responseContent.WriteString(textEvent.Delta)
+				responseChan <- textEvent.Delta
+				*hasContent = true
+			}
 
-Available tools:
-- get-athlete-profile: Get complete Strava athlete profile
-- get-recent-activities: Get recent activities (configurable count)
-- get-activity-details: Get detailed information about a specific activity
-- get-activity-streams: Get time-series data from an activity (heart rate, power, etc.)
-- update-athlete-logbook: Update the athlete's logbook with new information
+		case "response.output_item.added":
+			// Handle output item added events - check for function calls
+			if err := s.handleOutputItemAdded(event, toolCallState); err != nil {
+				slog.Error("Error processing output item added event", "event_type", event.Type, "error", err)
+				// Continue processing other events even if one output item event fails
+			}
 
-**Your Final Goal**
-Provide professional grade coaching to your athlete to help them improve their performance, achieve their goals. Make them feel good and inspire them to continue when they actually are making progress.`
+		case "response.function_call_arguments.delta", "response.function_call.completed", "response.function_call.started":
+			// Handle tool call related events using the new parseToolCallsFromEvents method
+			if err := s.parseToolCallsFromEvents(event, toolCallState); err != nil {
+				slog.Error("Error processing tool call event with call_id context", 
+					"event_type", event.Type, 
+					"error", err,
+					"active_call_ids", s.getActiveCallIDs(toolCallState),
+					"total_tool_calls", len(toolCallState.toolCalls))
+				// Continue processing other events even if one tool call event fails
+			}
 
-// buildEnhancedSystemPrompt creates system prompt with iterative analysis guidance
-func (s *aiService) buildEnhancedSystemPrompt(msgCtx *MessageContext) string {
-	basePrompt := systemPrompt
+		case "response.completed":
+			// Handle completion event - finalize all accumulated tool calls and capture response ID
+			completedEvent := event.AsResponseCompleted()
+			completedToolCalls := s.GetCompletedToolCalls(toolCallState)
+			
+			// Enhanced completion summary logging with all processed call_id values
+			allCallIDs := s.getAllCallIDs(toolCallState)
+			slog.Info("Response completed, finalizing tool calls with comprehensive summary",
+				"tool_call_count", len(completedToolCalls),
+				"response_id", completedEvent.Response.ID,
+				"all_call_ids", allCallIDs,
+				"completed_call_ids", s.getCompletedCallIDs(toolCallState),
+				"pending_call_ids", s.getPendingCallIDs(toolCallState))
 
-	// Add athlete logbook context if available
-	if msgCtx.AthleteLogbook != nil && msgCtx.AthleteLogbook.Content != "" {
-		basePrompt += fmt.Sprintf("\n\nCurrent Athlete Logbook:\n%s", msgCtx.AthleteLogbook.Content)
+			// Capture the response ID for multi-turn conversations
+			if completedEvent.Response.ID != "" && responseID != nil {
+				*responseID = completedEvent.Response.ID
+				slog.Info("Captured response ID for multi-turn conversation with call_id context", 
+					"response_id", completedEvent.Response.ID,
+					"associated_call_ids", allCallIDs)
+			}
+
+			// Add all results
+			*toolCalls = append(*toolCalls, completedToolCalls...)
+
+			// Enhanced individual tool call logging with call_id traceability
+			for _, toolCall := range completedToolCalls {
+				slog.Info("Finalized tool call with complete traceability",
+					"call_id", toolCall.CallID,
+					"tool_call_id", toolCall.CallID, // Include both for consistency
+					"function_name", toolCall.Name,
+					"args_length", len(toolCall.Arguments),
+					"arguments", toolCall.Arguments,
+					"item_id", toolCall.ID)
+			}
+			
+			// Log completion summary with all call_id values processed
+			slog.Info("Tool call processing pipeline completed successfully",
+				"total_processed_call_ids", len(allCallIDs),
+				"successful_completions", len(completedToolCalls),
+				"call_id_summary", allCallIDs)
+			
+			return nil
+
+		case "error":
+			// Handle generic error events
+			errorEvent := event.AsError()
+			return fmt.Errorf("responses API error: %s", errorEvent.Message)
+
+		default:
+			// Handle other event types that might be available
+			// For now, we'll log them for debugging and continue processing
+			slog.Debug("Unhandled event type in Responses API stream", "event_type", event.Type)
+
+			// Try to handle as text delta if it has similar structure
+			if strings.Contains(event.Type, "delta") && strings.Contains(event.Type, "text") {
+				// Attempt to extract text content from unknown text delta events
+				// This is a fallback for potential text events we haven't explicitly handled
+				slog.Debug("Attempting to handle unknown text delta event", "event_type", event.Type)
+			}
+		}
+	}
+
+	// Check for stream errors after processing all events
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("responses API stream error: %w", err)
+	}
+
+	// If we reach here without a completion event, finalize any accumulated tool calls
+	completedToolCalls := s.GetCompletedToolCalls(toolCallState)
+	slog.Debug("Stream ended without completion event, finalizing tool calls", "tool_call_count", len(completedToolCalls))
+
+	// Add all completed tool calls to the results
+	*toolCalls = append(*toolCalls, completedToolCalls...)
+
+	return nil
+}
+
+// processResponsesAPIStream processes the streaming response from Responses API using event-based processing (backward compatibility)
+func (s *aiService) processResponsesAPIStream(stream *ssestream.Stream[responses.ResponseStreamEventUnion], responseChan chan<- string, responseContent *strings.Builder, hasContent *bool, toolCalls *[]responses.ResponseFunctionToolCall) error {
+	var responseID string
+	return s.processResponsesAPIStreamWithID(stream, responseChan, responseContent, hasContent, toolCalls, &responseID)
+}
+
+// extractFunctionNameFromArguments attempts to extract function name from tool call arguments
+// This is a fallback method when function name is not provided in separate events
+func (s *aiService) extractFunctionNameFromArguments(arguments string) string {
+	// Handle empty or malformed arguments
+	if arguments == "" {
+		return "get-athlete-profile" // Default to profile for empty args
+	}
+
+	// Try to parse the arguments as JSON to extract function name if it's embedded
+	var argsMap map[string]interface{}
+	if err := json.Unmarshal([]byte(arguments), &argsMap); err != nil {
+		// If JSON parsing fails, try string-based heuristics
+		slog.Debug("Failed to parse tool call arguments as JSON, using heuristics", "arguments", arguments, "error", err)
+		return s.inferFunctionNameFromString(arguments)
+	}
+
+	// Check if there's a function name field in the arguments
+	if funcName, ok := argsMap["function"].(string); ok {
+		return funcName
+	}
+
+	// Infer function name based on argument structure and field presence
+	return s.inferFunctionNameFromFields(argsMap)
+}
+
+// inferFunctionNameFromFields infers function name based on the presence of specific fields in arguments
+func (s *aiService) inferFunctionNameFromFields(argsMap map[string]interface{}) string {
+	// Check for activity_id field (used by get-activity-details and get-activity-streams)
+	if _, hasActivityID := argsMap["activity_id"]; hasActivityID {
+		// Check for stream-specific fields
+		if _, hasStreamTypes := argsMap["stream_types"]; hasStreamTypes {
+			return "get-activity-streams"
+		}
+		if _, hasResolution := argsMap["resolution"]; hasResolution {
+			return "get-activity-streams"
+		}
+		if _, hasProcessingMode := argsMap["processing_mode"]; hasProcessingMode {
+			return "get-activity-streams"
+		}
+		// Default to activity details if only activity_id is present
+		return "get-activity-details"
+	}
+
+	// Check for per_page field (used by get-recent-activities)
+	if _, hasPerPage := argsMap["per_page"]; hasPerPage {
+		return "get-recent-activities"
+	}
+
+	// Check for content field (used by update-athlete-logbook)
+	if _, hasContent := argsMap["content"]; hasContent {
+		return "update-athlete-logbook"
+	}
+
+	// If no specific fields found, check if arguments are empty (get-athlete-profile)
+	if len(argsMap) == 0 {
+		return "get-athlete-profile"
+	}
+
+	// Default fallback based on most common usage patterns
+	slog.Warn("Could not infer function name from arguments, using default", "args_fields", getMapKeys(argsMap))
+	return "get-athlete-profile"
+}
+
+// inferFunctionNameFromString infers function name from string-based heuristics when JSON parsing fails
+func (s *aiService) inferFunctionNameFromString(arguments string) string {
+	// Simple heuristic: check if arguments contain fields specific to certain tools
+	if strings.Contains(arguments, "activity_id") {
+		if strings.Contains(arguments, "stream_types") || strings.Contains(arguments, "resolution") || strings.Contains(arguments, "processing_mode") {
+			return "get-activity-streams"
+		}
+		return "get-activity-details"
+	}
+	if strings.Contains(arguments, "per_page") {
+		return "get-recent-activities"
+	}
+	if strings.Contains(arguments, "content") {
+		return "update-athlete-logbook"
+	}
+	if arguments == "{}" || strings.TrimSpace(arguments) == "" {
+		return "get-athlete-profile"
+	}
+
+	// Default fallback
+	return "get-athlete-profile"
+}
+
+// getMapKeys returns the keys of a map for logging purposes
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// ToolCallState manages the state of tool calls during event-based processing
+type ToolCallState struct {
+	toolCalls map[string]*responses.ResponseFunctionToolCall // keyed by call_id
+	completed map[string]bool                                // keyed by call_id
+	itemToCallID map[string]string                           // maps item_id to call_id for delta event processing
+}
+
+// NewToolCallState creates a new tool call state manager
+func NewToolCallState() *ToolCallState {
+	return &ToolCallState{
+		toolCalls:    make(map[string]*responses.ResponseFunctionToolCall),
+		completed:    make(map[string]bool),
+		itemToCallID: make(map[string]string),
+	}
+}
+
+// parseToolCallsFromEvents processes Responses API events and manages tool call accumulation
+// This method handles event-based tool call processing with proper state management
+func (s *aiService) parseToolCallsFromEvents(event responses.ResponseStreamEventUnion, state *ToolCallState) error {
+	switch event.Type {
+	case "response.function_call_arguments.delta":
+		// Handle tool call arguments deltas - accumulate arguments
+		funcEvent := event.AsResponseFunctionCallArgumentsDelta()
+		return s.handleFunctionCallArgumentsDelta(funcEvent, state)
+
+	case "response.function_call.completed":
+		// Handle tool call completion events
+		return s.handleFunctionCallCompleted(event, state)
+
+	case "response.function_call.started":
+		// Handle tool call start events (if available)
+		return s.handleFunctionCallStarted(event, state)
+
+	default:
+		// Not a tool call related event, ignore
+		fmt.Println("unknown event found", event.Type, event.JSON)
+		return nil
+	}
+}
+
+// handleFunctionCallArgumentsDelta processes function call arguments delta events
+func (s *aiService) handleFunctionCallArgumentsDelta(event responses.ResponseFunctionCallArgumentsDeltaEvent, state *ToolCallState) error {
+	itemID := event.ItemID
+
+	// Enhanced validation for missing or empty item ID values
+	if itemID == "" {
+		// Log detailed error information including event structure when extraction fails
+		slog.Error("Function call arguments delta extraction failed: empty item ID",
+			"event_type", "response.function_call_arguments.delta",
+			"delta_content", event.Delta,
+			"event_structure", fmt.Sprintf("%+v", event),
+			"error", "empty_item_id")
+		return fmt.Errorf("function call arguments delta extraction failed: empty item ID")
+	}
+
+	// Additional validation for whitespace-only item IDs
+	if strings.TrimSpace(itemID) == "" {
+		slog.Error("Function call arguments delta extraction failed: item ID contains only whitespace",
+			"item_id", fmt.Sprintf("'%s'", itemID),
+			"event_type", "response.function_call_arguments.delta",
+			"delta_content", event.Delta,
+			"error", "whitespace_only_item_id")
+		return fmt.Errorf("function call arguments delta extraction failed: item ID contains only whitespace")
+	}
+
+	// Look up the correct call_id using the item_id from the delta event
+	callID, exists := state.itemToCallID[itemID]
+	if !exists {
+		// Implement fallback to use item_id as call_id when mapping is not found
+		// This can happen if delta events arrive before output_item.added events
+		callID = itemID
+		
+		// Store the fallback mapping for consistency
+		state.itemToCallID[itemID] = callID
+		
+		slog.Warn("Function call arguments delta processing using fallback: no call_id mapping found, using item_id as call_id",
+			"item_id", itemID,
+			"fallback_call_id", callID,
+			"event_type", "response.function_call_arguments.delta",
+			"delta_content", event.Delta,
+			"available_mappings", len(state.itemToCallID),
+			"fallback_reason", "missing_call_id_mapping")
+	}
+	
+	slog.Debug("Processing function call arguments delta with call_id traceability",
+		"call_id", callID,
+		"item_id", itemID,
+		"delta", event.Delta,
+		"event_type", "response.function_call_arguments.delta",
+		"total_active_calls", len(state.toolCalls))
+
+	// Check if this tool call already exists and update it using the correct call_id
+	if toolCall, exists := state.toolCalls[callID]; exists {
+		toolCall.Arguments += event.Delta
+		slog.Debug("Accumulated function call arguments delta with call_id traceability",
+			"call_id", callID,
+			"item_id", itemID,
+			"delta_length", len(event.Delta),
+			"total_args_length", len(toolCall.Arguments),
+			"function_name", toolCall.Name)
 	} else {
-		basePrompt += "\n\nNo athlete logbook exists yet. You should create one."
+		// This should be rare since output_item.added should come first, but handle gracefully
+		slog.Warn("Creating new tool call from arguments delta - output_item.added event may have been missed",
+			"call_id", callID,
+			"item_id", itemID,
+			"initial_delta", event.Delta)
+		
+		toolCall := &responses.ResponseFunctionToolCall{
+			ID:        itemID,
+			CallID:    callID,
+			Name:      "", // Name will be set when available or inferred later
+			Arguments: event.Delta,
+		}
+		state.toolCalls[callID] = toolCall
+		
+		slog.Info("Created new function call from arguments delta using correct call_id",
+			"call_id", callID,
+			"item_id", itemID,
+			"initial_delta", event.Delta)
 	}
 
-	return basePrompt
+	return nil
 }
 
-// shouldContinueAnalysis determines if another round of analysis should be performed
-func (s *aiService) shouldContinueAnalysis(processor *IterativeProcessor, toolCalls []openai.ToolCall, hasContent bool) (bool, string) {
-	// Don't continue if no tool calls
-	if len(toolCalls) == 0 {
-		return false, "no_tools"
+// handleFunctionCallCompleted processes function call completion events
+func (s *aiService) handleFunctionCallCompleted(event responses.ResponseStreamEventUnion, state *ToolCallState) error {
+	// Try to extract tool call ID from completion event
+	// Note: The exact structure may vary based on the actual API response format
+	slog.Debug("Function call completion event received", "event_type", event.Type)
+
+	// Mark all current tool calls as completed if we can't identify specific ones
+	for toolCallID := range state.toolCalls {
+		if !state.completed[toolCallID] {
+			state.completed[toolCallID] = true
+			slog.Debug("Marked tool call as completed", "tool_call_id", toolCallID)
+		}
 	}
 
-	// Don't continue if max rounds reached
-	if processor.CurrentRound >= processor.MaxRounds {
-		return false, "max_rounds"
-	}
-
-	// for now we will continue as long as there is tool calls and max round not reached
-	return true, "continue_analysis"
+	return nil
 }
 
-// getCoachingProgressMessage returns natural coaching-focused progress messages
-func (s *aiService) getCoachingProgressMessage(processor *IterativeProcessor, toolCalls []openai.ToolCall) string {
-	// Determine message based on tool calls and current context
-	if len(toolCalls) > 0 {
-		return s.getContextualProgressMessage(processor, toolCalls)
-	}
+// handleFunctionCallStarted processes function call start events
+func (s *aiService) handleFunctionCallStarted(event responses.ResponseStreamEventUnion, state *ToolCallState) error {
+	// Try to extract function name and ID from start event
+	// Note: The exact structure may vary based on the actual API response format
+	slog.Debug("Function call start event received", "event_type", event.Type)
 
-	// Fallback to round-based messages with coaching tone
-	return s.getRoundBasedProgressMessage(processor)
+	fmt.Println("function call started");
+	fmt.Println(event.JSON)
+
+	// This would need to be implemented based on the actual event structure
+	// For now, we'll rely on the arguments delta events to create tool calls
+
+	return nil
 }
 
-// getContextualProgressMessage returns progress messages based on specific tool calls
-func (s *aiService) getContextualProgressMessage(processor *IterativeProcessor, toolCalls []openai.ToolCall) string {
+// handleOutputItemAdded processes response.output_item.added events to extract call_id from function call items
+func (s *aiService) handleOutputItemAdded(event responses.ResponseStreamEventUnion, state *ToolCallState) error {
+	// Use event.AsResponseOutputItemAdded() to get the typed event structure
+	outputItemEvent := event.AsResponseOutputItemAdded()
+	
+	slog.Info("Processing output item added event",
+		"event_type", event.Type,
+		"item_id", outputItemEvent.Item.ID,
+		"item_type", outputItemEvent.Item.Type)
+
+	// Check if the item type is function_call before processing
+	if outputItemEvent.Item.Type != "function_call" {
+		slog.Debug("Output item is not a function call, skipping",
+			"item_type", outputItemEvent.Item.Type,
+			"item_id", outputItemEvent.Item.ID)
+		return nil
+	}
+
+	// Enhanced validation and error handling for call_id extraction
+	callID := outputItemEvent.Item.CallID
+	var fallbackUsed bool
+	var fallbackReason string
+
+	// Validate that call_id is not missing or empty
+	if callID == "" {
+		slog.Warn("Function call item missing call_id, detailed event structure",
+			"item_id", outputItemEvent.Item.ID,
+			"item_type", outputItemEvent.Item.Type,
+			"function_name", outputItemEvent.Item.Name,
+			"event_structure", fmt.Sprintf("%+v", outputItemEvent.Item))
+		
+		// Implement fallback to event.ItemID when call_id is unavailable
+		fallbackID := outputItemEvent.Item.ID
+		if fallbackID == "" {
+			// Log detailed error information including event structure when extraction fails
+			slog.Error("Call_id extraction failed: both call_id and item_id are empty",
+				"event_type", event.Type,
+				"item_structure", fmt.Sprintf("%+v", outputItemEvent.Item),
+				"full_event", fmt.Sprintf("%+v", outputItemEvent),
+				"error", "missing_identifiers")
+			return fmt.Errorf("call_id extraction failed: both call_id and item_id are empty in function call item")
+		}
+		
+		callID = fallbackID
+		fallbackUsed = true
+		fallbackReason = "missing_call_id"
+		
+		// Log fallback strategy usage with reasons
+		slog.Info("Using fallback identification strategy",
+			"fallback_call_id", callID,
+			"original_item_id", outputItemEvent.Item.ID,
+			"fallback_reason", fallbackReason,
+			"strategy", "item_id_fallback")
+	}
+
+	// Additional validation for empty call_id after potential fallback
+	if strings.TrimSpace(callID) == "" {
+		slog.Error("Call_id extraction failed: call_id is empty after validation",
+			"original_call_id", outputItemEvent.Item.CallID,
+			"fallback_id", outputItemEvent.Item.ID,
+			"event_structure", fmt.Sprintf("%+v", outputItemEvent.Item),
+			"error", "empty_call_id")
+		return fmt.Errorf("call_id extraction failed: call_id is empty after validation")
+	}
+
+	// Log successful extraction with fallback information
+	if fallbackUsed {
+		slog.Warn("Call_id extracted using fallback strategy",
+			"extracted_call_id", callID,
+			"fallback_reason", fallbackReason,
+			"item_id", outputItemEvent.Item.ID,
+			"function_name", outputItemEvent.Item.Name)
+	} else {
+		slog.Info("Successfully extracted call_id from function call item",
+			"call_id", callID,
+			"item_id", outputItemEvent.Item.ID,
+			"function_name", outputItemEvent.Item.Name)
+	}
+
+	// Check if this tool call already exists in state and update it
+	if existingToolCall, exists := state.toolCalls[callID]; exists {
+		// Update existing tool call with additional information
+		if existingToolCall.Name == "" && outputItemEvent.Item.Name != "" {
+			existingToolCall.Name = outputItemEvent.Item.Name
+			slog.Info("Updated existing tool call with function name",
+				"call_id", callID,
+				"function_name", outputItemEvent.Item.Name,
+				"fallback_used", fallbackUsed)
+		}
+	} else {
+		// Create new tool call entry with the extracted call_id
+		toolCall := &responses.ResponseFunctionToolCall{
+			ID:        outputItemEvent.Item.ID,        // Keep item ID for compatibility
+			CallID:    callID,                         // Use extracted call_id as primary key
+			Name:      outputItemEvent.Item.Name,      // Function name from the event
+			Arguments: "",                             // Arguments will be accumulated from delta events
+		}
+		
+		// Add to tool call state using call_id as the primary key
+		state.toolCalls[callID] = toolCall
+		
+		// Store mapping from item_id to call_id for delta event processing
+		state.itemToCallID[outputItemEvent.Item.ID] = callID
+		
+		slog.Info("Created new tool call from output item",
+			"call_id", callID,
+			"item_id", outputItemEvent.Item.ID,
+			"function_name", outputItemEvent.Item.Name,
+			"fallback_used", fallbackUsed,
+			"fallback_reason", fallbackReason)
+	}
+
+	return nil
+}
+
+// GetCompletedToolCalls returns all completed tool calls with proper function names
+func (s *aiService) GetCompletedToolCalls(state *ToolCallState) []responses.ResponseFunctionToolCall {
+	var completedCalls []responses.ResponseFunctionToolCall
+
+	slog.Info("Processing completed tool calls", "total_tool_calls", len(state.toolCalls))
+
+	for toolCallID, toolCall := range state.toolCalls {
+		fmt.Println("---------------------------")
+		fmt.Println(toolCall)
+		slog.Debug("Processing tool call",
+			"tool_call_id", toolCallID,
+			"current_name", toolCall.Name,
+			"args_length", len(toolCall.Arguments))
+
+		// Ensure function name is set
+		if toolCall.Name == "" {
+			inferredName := s.extractFunctionNameFromArguments(toolCall.Arguments)
+			toolCall.Name = inferredName
+			slog.Info("Inferred function name for tool call",
+				"tool_call_id", toolCallID,
+				"inferred_name", inferredName)
+		}
+
+		// Validate and sanitize the tool call
+		if s.validateToolCall(toolCall) {
+			// Create a clean copy of the tool call
+			cleanedToolCall := *toolCall
+			cleanedToolCall.CallID = toolCallID
+			completedCalls = append(completedCalls, cleanedToolCall)
+			slog.Info("Added completed tool call",
+				"tool_call_id", toolCallID,
+				"function_name", cleanedToolCall.Name,
+				"args_length", len(cleanedToolCall.Arguments))
+		} else {
+			slog.Warn("Skipping invalid tool call",
+				"tool_call_id", toolCallID,
+				"function_name", toolCall.Name,
+				"args_length", len(toolCall.Arguments))
+		}
+	}
+
+	slog.Info("Completed tool call processing", "valid_tool_calls", len(completedCalls))
+	return completedCalls
+}
+
+// validateToolCall validates that a tool call has all required fields and is properly formed
+func (s *aiService) validateToolCall(toolCall *responses.ResponseFunctionToolCall) bool {
+	// Check required fields - validate CallID as primary key
+	if toolCall.CallID == "" {
+		slog.Warn("Tool call missing call_id", "tool_call_id", toolCall.CallID)
+		return false
+	}
+
+	if toolCall.Name == "" {
+		slog.Warn("Tool call missing function name", "tool_call_id", toolCall.CallID)
+		return false
+	}
+
+	// Validate function name is one of our known tools
+	knownTools := map[string]bool{
+		"get-athlete-profile":    true,
+		"get-recent-activities":  true,
+		"get-activity-details":   true,
+		"get-activity-streams":   true,
+		"update-athlete-logbook": true,
+	}
+
+	if !knownTools[toolCall.Name] {
+		slog.Warn("Unknown function name in tool call", "tool_call_id", toolCall.CallID, "function_name", toolCall.Name)
+		return false
+	}
+
+	// Validate arguments are valid JSON
+	if toolCall.Arguments != "" {
+		var argsMap map[string]interface{}
+		if err := json.Unmarshal([]byte(toolCall.Arguments), &argsMap); err != nil {
+			slog.Warn("Tool call has invalid JSON arguments", "tool_call_id", toolCall.CallID, "function_name", toolCall.Name, "error", err)
+			return false
+		}
+	}
+
+	return true
+}
+
+// sanitizeToolCall cleans and normalizes a tool call
+func (s *aiService) sanitizeToolCall(toolCall responses.ResponseFunctionToolCall) responses.ResponseFunctionToolCall {
+	// Create a clean copy
+	cleaned := responses.ResponseFunctionToolCall{
+		ID:        strings.TrimSpace(toolCall.ID),
+		CallID:    strings.TrimSpace(toolCall.CallID),
+		Name:      strings.TrimSpace(toolCall.Name),
+		Arguments: strings.TrimSpace(toolCall.Arguments),
+	}
+
+	// Ensure arguments is valid JSON, default to empty object if not
+	if cleaned.Arguments == "" {
+		cleaned.Arguments = "{}"
+	} else {
+		// Validate and potentially fix JSON
+		var argsMap map[string]interface{}
+		if err := json.Unmarshal([]byte(cleaned.Arguments), &argsMap); err != nil {
+			slog.Warn("Sanitizing invalid JSON arguments", "tool_call_id", cleaned.CallID, "original_args", cleaned.Arguments)
+			cleaned.Arguments = "{}"
+		}
+	}
+
+	return cleaned
+}
+
+// IsToolCallComplete checks if a specific tool call is marked as completed
+func (s *aiService) IsToolCallComplete(state *ToolCallState, toolCallID string) bool {
+	return state.completed[toolCallID]
+}
+
+// GetToolCallCount returns the total number of tool calls being tracked
+func (s *aiService) GetToolCallCount(state *ToolCallState) int {
+	return len(state.toolCalls)
+}
+
+// GetCompletedToolCallCount returns the number of completed tool calls
+func (s *aiService) GetCompletedToolCallCount(state *ToolCallState) int {
+	count := 0
+	for _, completed := range state.completed {
+		if completed {
+			count++
+		}
+	}
+	return count
+}
+
+// MarkToolCallCompleted explicitly marks a tool call as completed
+func (s *aiService) MarkToolCallCompleted(state *ToolCallState, toolCallID string) {
+	if _, exists := state.toolCalls[toolCallID]; exists {
+		state.completed[toolCallID] = true
+		slog.Debug("Marked tool call as completed", "tool_call_id", toolCallID)
+	} else {
+		slog.Warn("Attempted to mark non-existent tool call as completed", "tool_call_id", toolCallID)
+	}
+}
+
+// GetToolCallByID retrieves a specific tool call by ID
+func (s *aiService) GetToolCallByID(state *ToolCallState, toolCallID string) (*responses.ResponseFunctionToolCall, bool) {
+	toolCall, exists := state.toolCalls[toolCallID]
+	return toolCall, exists
+}
+
+// HasPendingToolCalls checks if there are any tool calls that haven't been completed
+func (s *aiService) HasPendingToolCalls(state *ToolCallState) bool {
+	for toolCallID := range state.toolCalls {
+		if !state.completed[toolCallID] {
+			return true
+		}
+	}
+	return false
+}
+
+// getActiveCallIDs returns a list of all active call_ids for logging purposes
+func (s *aiService) getActiveCallIDs(state *ToolCallState) []string {
+	var callIDs []string
+	for callID := range state.toolCalls {
+		callIDs = append(callIDs, callID)
+	}
+	return callIDs
+}
+
+// getAllCallIDs returns all call_ids that have been processed
+func (s *aiService) getAllCallIDs(state *ToolCallState) []string {
+	var callIDs []string
+	for callID := range state.toolCalls {
+		callIDs = append(callIDs, callID)
+	}
+	return callIDs
+}
+
+// getCompletedCallIDs returns only the completed call_ids
+func (s *aiService) getCompletedCallIDs(state *ToolCallState) []string {
+	var callIDs []string
+	for callID, completed := range state.completed {
+		if completed {
+			callIDs = append(callIDs, callID)
+		}
+	}
+	return callIDs
+}
+
+// getPendingCallIDs returns only the pending call_ids
+func (s *aiService) getPendingCallIDs(state *ToolCallState) []string {
+	var callIDs []string
+	for callID := range state.toolCalls {
+		if !state.completed[callID] {
+			callIDs = append(callIDs, callID)
+		}
+	}
+	return callIDs
+}
+
+// getContentPreview returns a truncated preview of content for logging purposes
+func (s *aiService) getContentPreview(content string) string {
+	const maxPreviewLength = 100
+	if len(content) <= maxPreviewLength {
+		return content
+	}
+	return content[:maxPreviewLength] + "..."
+}
+
+// parseToolCallsFromResponsesAPIEvents parses tool calls from Responses API events (legacy method for compatibility)
+// Note: This method is now primarily used as a fallback. The main tool call processing
+// is handled by parseToolCallsFromEvents for better event-based processing.
+func (s *aiService) parseToolCallsFromResponsesAPIEvents(event responses.ResponseFunctionCallArgumentsDeltaEvent, existingToolCalls []responses.ResponseFunctionToolCall) []responses.ResponseFunctionToolCall {
+	// Check if this tool call already exists and update it
+	for i, existing := range existingToolCalls {
+		if existing.ID == event.ItemID {
+			existingToolCalls[i].Arguments += event.Delta
+			return existingToolCalls
+		}
+	}
+
+	// New tool call - create with accumulated delta
+	toolCall := responses.ResponseFunctionToolCall{
+		ID:        event.ItemID,
+		Name:      "", // Will need to be set from function call start event
+		Arguments: event.Delta,
+	}
+
+	return append(existingToolCalls, toolCall)
+}
+
+// getContextualProgressMessageForResponsesAPI returns progress messages based on specific tool calls for Responses API
+func (s *aiService) getContextualProgressMessageForResponsesAPI(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall) string {
 	// Analyze the combination of tool calls to provide contextual messages
 	hasProfile := false
 	hasActivities := false
@@ -589,7 +1211,7 @@ func (s *aiService) getContextualProgressMessage(processor *IterativeProcessor, 
 	hasLogbookUpdate := false
 
 	for _, toolCall := range toolCalls {
-		switch toolCall.Function.Name {
+		switch toolCall.Name {
 		case "get-athlete-profile":
 			hasProfile = true
 		case "get-recent-activities":
@@ -659,6 +1281,488 @@ func (s *aiService) getContextualProgressMessage(processor *IterativeProcessor, 
 	}
 
 	// Default contextual message
+	return s.getRoundBasedProgressMessage(processor)
+}
+
+// executeToolsFromResponsesAPI executes the tool calls from Responses API and returns the results
+func (s *aiService) executeToolsFromResponsesAPI(ctx context.Context, msgCtx *MessageContext, toolCalls []responses.ResponseFunctionToolCall) ([]ToolResult, error) {
+	var results []ToolResult
+
+	// Enhanced logging with all call_id values for traceability
+	allCallIDs := make([]string, len(toolCalls))
+	for i, toolCall := range toolCalls {
+		allCallIDs[i] = toolCall.CallID
+	}
+	
+	slog.Info("Executing tool calls from Responses API with call_id traceability", 
+		"tool_call_count", len(toolCalls),
+		"all_call_ids", allCallIDs,
+		"implementation", "responses_api")
+
+	for i, toolCall := range toolCalls {
+		slog.Info("Executing individual tool call with call_id context",
+			"index", i,
+			"call_id", toolCall.CallID,
+			"tool_call_id", toolCall.CallID, // Include both for consistency
+			"function_name", toolCall.Name,
+			"arguments", toolCall.Arguments,
+			"item_id", toolCall.ID)
+
+		result := ToolResult{
+			ToolCallID: toolCall.CallID,
+		}
+
+		slog.Info("Creating ToolResult with extracted call_id",
+			"tool_call_id", toolCall.CallID,
+			"function_name", toolCall.Name,
+			"item_id", toolCall.ID)
+
+		switch toolCall.Name {
+		case "get-athlete-profile":
+			content, err := s.executeGetAthleteProfile(ctx, msgCtx)
+			if err != nil {
+				result.Error = err.Error()
+				result.Content = fmt.Sprintf("Error getting athlete profile: %v", err)
+			} else {
+				result.Content = content
+			}
+
+		case "get-recent-activities":
+			var args struct {
+				PerPage int `json:"per_page"`
+			}
+			if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
+				result.Error = err.Error()
+				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
+			} else {
+				if args.PerPage == 0 {
+					args.PerPage = 30
+				}
+				content, err := s.executeGetRecentActivities(ctx, msgCtx, args.PerPage)
+				if err != nil {
+					result.Error = err.Error()
+					result.Content = fmt.Sprintf("Error getting recent activities: %v", err)
+				} else {
+					result.Content = content
+				}
+			}
+
+		case "get-activity-details":
+			var args struct {
+				ActivityID int64 `json:"activity_id"`
+			}
+			if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
+				result.Error = err.Error()
+				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
+			} else {
+				content, err := s.executeGetActivityDetails(ctx, msgCtx, args.ActivityID)
+				if err != nil {
+					result.Error = err.Error()
+					result.Content = fmt.Sprintf("Error getting activity details: %v", err)
+				} else {
+					result.Content = content
+				}
+			}
+
+		case "get-activity-streams":
+			var args struct {
+				ActivityID     int64    `json:"activity_id"`
+				StreamTypes    []string `json:"stream_types"`
+				Resolution     string   `json:"resolution"`
+				ProcessingMode string   `json:"processing_mode"`
+				PageNumber     int      `json:"page_number"`
+				PageSize       int      `json:"page_size"`
+				SummaryPrompt  string   `json:"summary_prompt"`
+			}
+			if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
+				result.Error = err.Error()
+				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
+			} else {
+				// Set defaults
+				if len(args.StreamTypes) == 0 {
+					args.StreamTypes = []string{"time", "distance", "heartrate", "watts"}
+				}
+				if args.Resolution == "" {
+					args.Resolution = "medium"
+				}
+				if args.ProcessingMode == "" {
+					args.ProcessingMode = "ai-summary"
+				}
+				if args.PageNumber == 0 {
+					args.PageNumber = 1
+				}
+				if args.PageSize == 0 {
+					args.PageSize = 1000
+				}
+
+				// Validate ai-summary mode requires summary_prompt
+				if args.ProcessingMode == "ai-summary" && args.SummaryPrompt == "" {
+					result.Error = "summary_prompt is required when processing_mode is 'ai-summary'"
+					result.Content = "Error: summary_prompt parameter is required when using ai-summary processing mode"
+				} else {
+					processedResult, err := s.executeGetActivityStreamsWithProcessing(ctx, msgCtx, args.ActivityID, args.StreamTypes, args.Resolution, args.ProcessingMode, args.PageNumber, args.PageSize, args.SummaryPrompt)
+					if err != nil {
+						result.Error = err.Error()
+						result.Content = fmt.Sprintf("Error getting activity streams: %v", err)
+					} else {
+						result.Data = processedResult.Data
+						result.Content = processedResult.Content
+					}
+				}
+			}
+
+		case "update-athlete-logbook":
+			var args struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
+				result.Error = err.Error()
+				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
+			} else {
+				data, err := s.executeUpdateAthleteLogbook(ctx, msgCtx, args.Content)
+				if err != nil {
+					result.Error = err.Error()
+					result.Content = fmt.Sprintf("Error updating athlete logbook: %v", err)
+				} else {
+					result.Data = data
+					result.Content = "Athlete logbook updated successfully"
+				}
+			}
+
+		default:
+			result.Error = "unknown tool"
+			result.Content = fmt.Sprintf("Unknown tool: %s", toolCall.Name)
+		}
+
+		slog.Info("Completed tool execution with call_id traceability",
+			"call_id", result.ToolCallID,
+			"tool_call_id", result.ToolCallID, // Include both for consistency
+			"function_name", toolCall.Name,
+			"has_error", result.Error != "",
+			"content_length", len(result.Content),
+			"execution_index", i)
+
+		results = append(results, result)
+	}
+
+	// Enhanced completion summary with all call_id values processed
+	completedCallIDs := make([]string, len(results))
+	successfulExecutions := 0
+	for i, result := range results {
+		completedCallIDs[i] = result.ToolCallID
+		if result.Error == "" {
+			successfulExecutions++
+		}
+	}
+	
+	slog.Info("All tool executions completed with comprehensive call_id summary",
+		"total_results", len(results),
+		"successful_executions", successfulExecutions,
+		"failed_executions", len(results) - successfulExecutions,
+		"completed_call_ids", completedCallIDs,
+		"implementation", "responses_api")
+
+	return results, nil
+}
+
+// accumulateAnalysisContext builds enhanced context with accumulated insights
+func (s *aiService) accumulateAnalysisContext(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall, toolResults []ToolResult, responseContent string) *IterativeProcessor {
+	// Add tool results to processor
+	processor.AddToolResults(toolResults)
+
+	// Add assistant message with response content to conversation
+	if responseContent != "" {
+		processor.Messages = append(processor.Messages, responses.ResponseInputItemParamOfMessage(
+			responseContent,
+			responses.EasyInputMessageRoleAssistant,
+		))
+	}
+
+	// Fix tool result IDs to match the current tool calls
+	// This is the key fix: ensure tool results use the exact IDs from the current conversation
+	fixedToolResults := toolResults
+
+	slog.Info("Fixed tool call IDs for function call outputs",
+		"expected_tool_calls", len(toolCalls),
+		"original_tool_results", len(toolResults),
+		"fixed_tool_results", len(fixedToolResults))
+
+	// Add tool results as function call outputs with fixed IDs
+	successfullyAdded := 0
+	for _, result := range fixedToolResults {
+		// Validate tool call ID before adding to conversation
+		if result.ToolCallID == "" {
+			slog.Warn("Skipping tool result with empty call_id - conversation traceability issue",
+				"content_length", len(result.Content),
+				"has_error", result.Error != "",
+				"result_content_preview", s.getContentPreview(result.Content),
+				"error_type", "missing_call_id_conversation")
+			continue
+		}
+
+		slog.Info("Adding tool call result to conversation with call_id traceability",
+			"call_id", result.ToolCallID,
+			"tool_call_id", result.ToolCallID, // Include both for consistency
+			"content_length", len(result.Content),
+			"has_error", result.Error != "",
+			"result_index", successfullyAdded)
+
+		// Create function call output with proper error handling
+		functionCallOutput := responses.ResponseInputItemParamOfFunctionCallOutput(
+			result.ToolCallID,
+			result.Content,
+		)
+
+		processor.Messages = append(processor.Messages, functionCallOutput)
+		successfullyAdded++
+	}
+
+	// Enhanced completion summary with call_id traceability
+	addedCallIDs := make([]string, 0, successfullyAdded)
+	for _, result := range fixedToolResults {
+		if result.ToolCallID != "" {
+			addedCallIDs = append(addedCallIDs, result.ToolCallID)
+		}
+	}
+	
+	slog.Info("Successfully added function call outputs with call_id summary",
+		"added_count", successfullyAdded,
+		"total_results", len(fixedToolResults),
+		"added_call_ids", addedCallIDs,
+		"skipped_results", len(fixedToolResults) - successfullyAdded)
+
+	return processor
+}
+
+// fixToolResultIDs ensures tool results have the correct tool call IDs that match the current conversation
+func (s *aiService) fixToolResultIDs(toolCalls []responses.ResponseFunctionToolCall, toolResults []ToolResult) []ToolResult {
+	// Create a mapping from function name + arguments to tool call ID
+	// This allows us to match tool results to the correct tool call IDs
+	toolCallMap := make(map[string]string) // key: function_name, value: tool_call_id
+
+	for _, toolCall := range toolCalls {
+		if toolCall.Name != "" && toolCall.CallID != "" {
+			// Use function name as the key for matching
+			// In most cases, there's only one call per function per round
+			toolCallMap[toolCall.Name] = toolCall.CallID
+
+			slog.Debug("Mapped tool call",
+				"function_name", toolCall.Name,
+				"tool_call_id", toolCall.CallID)
+		}
+	}
+
+	// Fix the tool result IDs
+	var fixedResults []ToolResult
+	for i, result := range toolResults {
+		// Try to determine which tool call this result corresponds to
+		// We need to infer the function name from the tool execution
+		functionName := s.inferFunctionNameFromToolResult(result, i, toolCalls)
+
+		if correctID, exists := toolCallMap[functionName]; exists {
+			// Create a new result with the correct tool call ID
+			fixedResult := ToolResult{
+				ToolCallID: correctID,
+				Content:    result.Content,
+				Error:      result.Error,
+				Data:       result.Data,
+			}
+			fixedResults = append(fixedResults, fixedResult)
+
+			slog.Info("Fixed tool result call_id for proper correlation",
+				"original_call_id", result.ToolCallID,
+				"fixed_call_id", correctID,
+				"function_name", functionName,
+				"correlation_method", "function_name_mapping")
+		} else {
+			slog.Warn("Could not find matching tool call for result - call_id correlation failed",
+				"original_call_id", result.ToolCallID,
+				"inferred_function", functionName,
+				"available_functions", getMapKeysString(toolCallMap),
+				"correlation_issue", "no_matching_call_id")
+
+			// Keep the original result if we can't fix it
+			fixedResults = append(fixedResults, result)
+		}
+	}
+
+	return fixedResults
+}
+
+// inferFunctionNameFromToolResult tries to determine which function a tool result corresponds to
+func (s *aiService) inferFunctionNameFromToolResult(result ToolResult, index int, toolCalls []responses.ResponseFunctionToolCall) string {
+	// If we have the same number of results as tool calls, match by index
+	if len(toolCalls) > index {
+		return toolCalls[index].Name
+	}
+
+	// Try to infer from the content or error message
+	content := strings.ToLower(result.Content)
+	if strings.Contains(content, "athlete profile") || strings.Contains(content, "profile") {
+		return "get-athlete-profile"
+	}
+	if strings.Contains(content, "recent activities") || strings.Contains(content, "activities") {
+		return "get-recent-activities"
+	}
+	if strings.Contains(content, "activity details") || strings.Contains(content, "activity") {
+		return "get-activity-details"
+	}
+	if strings.Contains(content, "activity streams") || strings.Contains(content, "streams") {
+		return "get-activity-streams"
+	}
+	if strings.Contains(content, "logbook updated") || strings.Contains(content, "logbook") {
+		return "update-athlete-logbook"
+	}
+
+	// Default fallback - use the first tool call if available
+	if len(toolCalls) > 0 {
+		return toolCalls[0].Name
+	}
+
+	return "unknown"
+}
+
+// getMapKeysString returns the keys of a string map as a slice for logging
+func getMapKeysString(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+
+
+// accumulateAnalysisContextSafely builds enhanced context with accumulated insights while avoiding tool call ID mismatches
+func (s *aiService) accumulateAnalysisContextSafely(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall, toolResults []ToolResult, responseContent string) *IterativeProcessor {
+	// Add tool results to processor
+	processor.AddToolResults(toolResults)
+
+	// Add assistant message with response content to conversation
+	if responseContent != "" {
+		processor.Messages = append(processor.Messages, responses.ResponseInputItemParamOfMessage(
+			responseContent,
+			responses.EasyInputMessageRoleAssistant,
+		))
+	}
+
+	// Instead of adding function call outputs (which can cause ID mismatches),
+	// add the tool results as regular user messages with clear context
+	for _, result := range toolResults {
+		if result.ToolCallID == "" {
+			slog.Warn("Skipping tool result with empty call_id - safe context traceability issue",
+				"content_length", len(result.Content),
+				"has_error", result.Error != "",
+				"result_content_preview", s.getContentPreview(result.Content),
+				"error_type", "missing_call_id_safe_context")
+			continue
+		}
+
+		slog.Info("Adding tool result as user message with call_id traceability",
+			"call_id", result.ToolCallID,
+			"tool_call_id", result.ToolCallID, // Include both for consistency
+			"content_length", len(result.Content),
+			"has_error", result.Error != "")
+
+		// Format the tool result as a clear user message
+		var toolResultMessage string
+		if result.Error != "" {
+			toolResultMessage = fmt.Sprintf("Tool execution error: %s", result.Error)
+		} else {
+			toolResultMessage = fmt.Sprintf("Tool execution result: %s", result.Content)
+		}
+
+		processor.Messages = append(processor.Messages, responses.ResponseInputItemParamOfMessage(
+			toolResultMessage,
+			responses.EasyInputMessageRoleUser,
+		))
+	}
+
+	// Enhanced completion summary with call_id traceability
+	processedCallIDs := make([]string, 0, len(toolResults))
+	for _, result := range toolResults {
+		if result.ToolCallID != "" {
+			processedCallIDs = append(processedCallIDs, result.ToolCallID)
+		}
+	}
+	
+	slog.Info("Successfully accumulated analysis context safely with call_id summary",
+		"total_messages", len(processor.Messages),
+		"tool_results", len(toolResults),
+		"processed_call_ids", processedCallIDs,
+		"context_method", "safe_user_messages")
+
+	return processor
+}
+
+var systemPrompt = `You are Bodda, an elite running and/or cycling coach mentoring an athlete with access to their Strava profile and all of their activities. Your responses should look and feel like it is coming from an elite professional coach.
+
+When asked about any particular workout, provide a thorough, data-driven assessment, combining both quantitative insights and textual interpretation. Begin your report with a written summary that highlights key findings and context. Add clear coaching feedback and personalized training recommendations. These should be practical, actionable, and grounded solely in the data provided—no assumptions or fabrications. Do not hide or sugarcoat weakness.
+
+LOGBOOK MANAGEMENT:
+- The logbook has NO predefined schema - you have complete freedom to structure it based on coaching best practices
+- If no logbook exists, use appropriate tools to get athlete's profile and recent activities to create one and then save it with the provided tool.
+- You should get last 30 activities for the logbook in addition to the athlete profile.
+- You can update the logbook profile section when you determine it needs fresh data from Strava
+- Whenever you think the logbook needs update, you should do it with the provided tool. It could be after analyzing an activity, providing suggestion, plan, athlete sharing their constraint, preference etc. All significant or useful info about the athlete should be in the logbook.
+- The logbook is stored using the athlete's Strava ID, ensuring their data persists across login sessions
+- Include the athlete's Strava ID and current timestamp in the logbook
+
+COACHING APPROACH:
+- Use the logbook context to provide personalized coaching based on the athlete's complete history
+- Structure the logbook content however you think will be most effective for coaching
+
+RESPONSE FORMAT:
+- Your response will be rendered as markdown, so feel free to format your response using markdown when appropriate.
+
+Available tools:
+- get-athlete-profile: Get complete Strava athlete profile
+- get-recent-activities: Get recent activities (configurable count)
+- get-activity-details: Get detailed information about a specific activity
+- get-activity-streams: Get time-series data from an activity (heart rate, power, etc.)
+- update-athlete-logbook: Update the athlete's logbook with new information
+
+**Your Final Goal**
+Provide professional grade coaching to your athlete to help them improve their performance, achieve their goals. Make them feel good and inspire them to continue when they actually are making progress.`
+
+// buildEnhancedSystemPrompt creates system prompt with iterative analysis guidance
+func (s *aiService) buildEnhancedSystemPrompt(msgCtx *MessageContext) string {
+	basePrompt := systemPrompt
+
+	// Add athlete logbook context if available
+	if msgCtx.AthleteLogbook != nil && msgCtx.AthleteLogbook.Content != "" {
+		basePrompt += fmt.Sprintf("\n\nCurrent Athlete Logbook:\n%s", msgCtx.AthleteLogbook.Content)
+	} else {
+		basePrompt += "\n\nNo athlete logbook exists yet. You should create one."
+	}
+
+	return basePrompt
+}
+
+// shouldContinueAnalysis determines if another round of analysis should be performed
+func (s *aiService) shouldContinueAnalysis(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall, hasContent bool) (bool, string) {
+	// Don't continue if no tool calls
+	if len(toolCalls) == 0 {
+		return false, "no_tools"
+	}
+
+	// Don't continue if max rounds reached
+	if processor.CurrentRound >= processor.MaxRounds {
+		return false, "max_rounds"
+	}
+
+	// for now we will continue as long as there is tool calls and max round not reached
+	return true, "continue_analysis"
+}
+
+// getCoachingProgressMessage returns natural coaching-focused progress messages
+func (s *aiService) getCoachingProgressMessage(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall) string {
+	// Determine message based on tool calls and current context
+	if len(toolCalls) > 0 {
+		return s.getContextualProgressMessageForResponsesAPI(processor, toolCalls)
+	}
+
+	// Fallback to round-based messages with coaching tone
 	return s.getRoundBasedProgressMessage(processor)
 }
 
@@ -752,8 +1856,8 @@ func (s *aiService) generateFinalResponse(processor *IterativeProcessor, reason 
 }
 
 // executeToolsWithRecovery executes tools with enhanced error recovery
-func (s *aiService) executeToolsWithRecovery(ctx context.Context, msgCtx *MessageContext, toolCalls []openai.ToolCall) ([]ToolResult, error) {
-	results, err := s.executeTools(ctx, msgCtx, toolCalls)
+func (s *aiService) executeToolsWithRecovery(ctx context.Context, msgCtx *MessageContext, toolCalls []responses.ResponseFunctionToolCall) ([]ToolResult, error) {
+	results, err := s.executeToolsFromResponsesAPI(ctx, msgCtx, toolCalls)
 	if err != nil {
 		log.Printf("Tool execution error: %v", err)
 	}
@@ -787,58 +1891,6 @@ func (s *aiService) executeToolsWithRecovery(ctx context.Context, msgCtx *Messag
 	// If we reach here, all tools failed but executeTools didn't return an error
 	// This means all results have Error fields set
 	return nil, fmt.Errorf("all tool calls failed")
-}
-
-// accumulateAnalysisContext builds enhanced context with accumulated insights
-func (s *aiService) accumulateAnalysisContext(processor *IterativeProcessor, toolCalls []openai.ToolCall, toolResults []ToolResult, responseContent string) *IterativeProcessor {
-	// Add tool results to processor
-	processor.AddToolResults(toolResults)
-
-	// Add assistant message with tool calls to conversation
-	processor.Messages = append(processor.Messages, openai.ChatCompletionMessage{
-		Role:      openai.ChatMessageRoleAssistant,
-		Content:   responseContent,
-		ToolCalls: toolCalls,
-	})
-
-	// Add tool results as messages with enhanced context
-	for _, result := range toolResults {
-		processor.Messages = append(processor.Messages, openai.ChatCompletionMessage{
-			Role:       openai.ChatMessageRoleTool,
-			Content:    result.Content,
-			ToolCallID: result.ToolCallID,
-		})
-	}
-
-	return processor
-}
-
-// parseToolCallsFromDelta parses tool calls from streaming delta with improved handling
-func (s *aiService) parseToolCallsFromDelta(deltaToolCalls []openai.ToolCall, existingToolCalls []openai.ToolCall, currentToolCall **openai.ToolCall) []openai.ToolCall {
-	for _, toolCall := range deltaToolCalls {
-		if toolCall.Index != nil {
-			// New tool call or existing one
-			for len(existingToolCalls) <= *toolCall.Index {
-				existingToolCalls = append(existingToolCalls, openai.ToolCall{})
-			}
-			*currentToolCall = &existingToolCalls[*toolCall.Index]
-
-			if toolCall.ID != "" {
-				(*currentToolCall).ID = toolCall.ID
-			}
-			if toolCall.Type != "" {
-				(*currentToolCall).Type = toolCall.Type
-			}
-			if toolCall.Function.Name != "" {
-				(*currentToolCall).Function.Name = toolCall.Function.Name
-			}
-		}
-
-		if *currentToolCall != nil && toolCall.Function.Arguments != "" {
-			(*currentToolCall).Function.Arguments += toolCall.Function.Arguments
-		}
-	}
-	return existingToolCalls
 }
 
 // handleStreamingError handles streaming errors with appropriate recovery
@@ -876,138 +1928,6 @@ func (s *aiService) handleToolExecutionError(err error, processor *IterativeProc
 
 	// No previous data, return error
 	return fmt.Errorf("unable to gather training data: %w", err)
-}
-
-// executeTools executes the tool calls and returns the results
-func (s *aiService) executeTools(ctx context.Context, msgCtx *MessageContext, toolCalls []openai.ToolCall) ([]ToolResult, error) {
-	var results []ToolResult
-
-	for _, toolCall := range toolCalls {
-		result := ToolResult{
-			ToolCallID: toolCall.ID,
-		}
-
-		switch toolCall.Function.Name {
-		case "get-athlete-profile":
-			content, err := s.executeGetAthleteProfile(ctx, msgCtx)
-			if err != nil {
-				result.Error = err.Error()
-				result.Content = fmt.Sprintf("Error getting athlete profile: %v", err)
-			} else {
-				result.Content = content
-			}
-
-		case "get-recent-activities":
-			var args struct {
-				PerPage int `json:"per_page"`
-			}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				result.Error = err.Error()
-				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
-			} else {
-				if args.PerPage == 0 {
-					args.PerPage = 30
-				}
-				content, err := s.executeGetRecentActivities(ctx, msgCtx, args.PerPage)
-				if err != nil {
-					result.Error = err.Error()
-					result.Content = fmt.Sprintf("Error getting recent activities: %v", err)
-				} else {
-					result.Content = content
-				}
-			}
-
-		case "get-activity-details":
-			var args struct {
-				ActivityID int64 `json:"activity_id"`
-			}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				result.Error = err.Error()
-				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
-			} else {
-				content, err := s.executeGetActivityDetails(ctx, msgCtx, args.ActivityID)
-				if err != nil {
-					result.Error = err.Error()
-					result.Content = fmt.Sprintf("Error getting activity details: %v", err)
-				} else {
-					result.Content = content
-				}
-			}
-
-		case "get-activity-streams":
-			var args struct {
-				ActivityID     int64    `json:"activity_id"`
-				StreamTypes    []string `json:"stream_types"`
-				Resolution     string   `json:"resolution"`
-				ProcessingMode string   `json:"processing_mode"`
-				PageNumber     int      `json:"page_number"`
-				PageSize       int      `json:"page_size"`
-				SummaryPrompt  string   `json:"summary_prompt"`
-			}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				result.Error = err.Error()
-				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
-			} else {
-				// Set defaults
-				if len(args.StreamTypes) == 0 {
-					args.StreamTypes = []string{"time", "distance", "heartrate", "watts"}
-				}
-				if args.Resolution == "" {
-					args.Resolution = "medium"
-				}
-				if args.ProcessingMode == "" {
-					args.ProcessingMode = "ai-summary"
-				}
-				if args.PageNumber == 0 {
-					args.PageNumber = 1
-				}
-				if args.PageSize == 0 {
-					args.PageSize = 1000
-				}
-
-				// Validate ai-summary mode requires summary_prompt
-				if args.ProcessingMode == "ai-summary" && args.SummaryPrompt == "" {
-					result.Error = "summary_prompt is required when processing_mode is 'ai-summary'"
-					result.Content = "Error: summary_prompt parameter is required when using ai-summary processing mode"
-				} else {
-					processedResult, err := s.executeGetActivityStreamsWithProcessing(ctx, msgCtx, args.ActivityID, args.StreamTypes, args.Resolution, args.ProcessingMode, args.PageNumber, args.PageSize, args.SummaryPrompt)
-					if err != nil {
-						result.Error = err.Error()
-						result.Content = fmt.Sprintf("Error getting activity streams: %v", err)
-					} else {
-						result.Data = processedResult.Data
-						result.Content = processedResult.Content
-					}
-				}
-			}
-
-		case "update-athlete-logbook":
-			var args struct {
-				Content string `json:"content"`
-			}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				result.Error = err.Error()
-				result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
-			} else {
-				data, err := s.executeUpdateAthleteLogbook(ctx, msgCtx, args.Content)
-				if err != nil {
-					result.Error = err.Error()
-					result.Content = fmt.Sprintf("Error updating athlete logbook: %v", err)
-				} else {
-					result.Data = data
-					result.Content = "Athlete logbook updated successfully"
-				}
-			}
-
-		default:
-			result.Error = "unknown tool"
-			result.Content = fmt.Sprintf("Unknown tool: %s", toolCall.Function.Name)
-		}
-
-		results = append(results, result)
-	}
-
-	return results, nil
 }
 
 // Tool execution methods
@@ -1242,6 +2162,10 @@ func (s *aiService) handleOpenAIError(err error) error {
 		return ErrOpenAIUnavailable
 	case strings.Contains(errStr, "connection"):
 		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "network is unreachable"):
+		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "no such host"):
+		return ErrOpenAIUnavailable
 	case strings.Contains(errStr, "context_length_exceeded"):
 		return ErrContextTooLong
 	case strings.Contains(errStr, "invalid_request_error"):
@@ -1296,6 +2220,118 @@ func (s *aiService) handleStravaError(err error, operation string) error {
 		return fmt.Errorf("strava service is temporarily unavailable. Please try again later")
 	default:
 		return fmt.Errorf("unable to retrieve %s from Strava: %v", operation, err)
+	}
+}
+
+// handleResponsesAPIError converts official OpenAI SDK errors to our custom error types
+func (s *aiService) handleResponsesAPIError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	log.Printf("Official OpenAI SDK error: %v", err)
+
+	// Check for official SDK error type using type assertion
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) && apiErr != nil {
+		// Handle official SDK Error based on status code and error details
+		switch apiErr.StatusCode {
+		case 400:
+			// Bad Request errors
+			switch {
+			case strings.Contains(apiErr.Message, "context_length_exceeded"):
+				return ErrContextTooLong
+			case strings.Contains(apiErr.Message, "invalid_request"):
+				return ErrInvalidInput
+			case strings.Contains(apiErr.Message, "model_not_found"):
+				return ErrInvalidInput
+			case strings.Contains(apiErr.Type, "invalid_request_error"):
+				return ErrInvalidInput
+			default:
+				return fmt.Errorf("invalid request: %s", apiErr.Message)
+			}
+		case 401:
+			// Unauthorized errors
+			return fmt.Errorf("authentication failed: %s", apiErr.Message)
+		case 403:
+			// Forbidden errors
+			return fmt.Errorf("permission denied: %s", apiErr.Message)
+		case 404:
+			// Not Found errors
+			return fmt.Errorf("resource not found: %s", apiErr.Message)
+		case 429:
+			// Rate Limit errors
+			return ErrOpenAIRateLimit
+		case 500, 502, 503, 504:
+			// Server errors
+			return ErrOpenAIUnavailable
+		default:
+			// Other HTTP status codes
+			return fmt.Errorf("OpenAI API error (status %d): %s", apiErr.StatusCode, apiErr.Message)
+		}
+	}
+
+	// Check for string-based error patterns as fallback for non-API errors
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "rate limit"):
+		return ErrOpenAIRateLimit
+	case strings.Contains(errStr, "quota"):
+		return ErrOpenAIQuotaExceeded
+	case strings.Contains(errStr, "timeout"):
+		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "connection"):
+		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "network is unreachable"):
+		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "no such host"):
+		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "context_length_exceeded"):
+		return ErrContextTooLong
+	case strings.Contains(errStr, "invalid_request_error"):
+		return ErrInvalidInput
+	case strings.Contains(errStr, "service_unavailable"):
+		return ErrOpenAIUnavailable
+	case strings.Contains(errStr, "server_error"):
+		return ErrOpenAIUnavailable
+	default:
+		return fmt.Errorf("OpenAI Responses API error: %w", err)
+	}
+}
+
+// categorizeToolExecutionError provides enhanced error categorization for tool execution failures
+func (s *aiService) categorizeToolExecutionError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	errStr := err.Error()
+	log.Printf("Categorizing tool execution error: %v", err)
+
+	// Check for specific tool execution error patterns
+	switch {
+	case strings.Contains(errStr, "strava"):
+		// Strava-related errors
+		if strings.Contains(errStr, "rate limit") {
+			return fmt.Errorf("Strava API rate limit exceeded. Please try again in a few minutes")
+		}
+		if strings.Contains(errStr, "token") || strings.Contains(errStr, "auth") {
+			return fmt.Errorf("Strava authentication issue. Please reconnect your Strava account")
+		}
+		if strings.Contains(errStr, "not found") {
+			return fmt.Errorf("Requested Strava data not found or not accessible")
+		}
+		return fmt.Errorf("Strava service error: %w", err)
+	case strings.Contains(errStr, "timeout"):
+		return fmt.Errorf("Request timed out while accessing training data")
+	case strings.Contains(errStr, "network") || strings.Contains(errStr, "connection"):
+		return fmt.Errorf("Network connectivity issue while accessing training data")
+	case strings.Contains(errStr, "json") || strings.Contains(errStr, "parse"):
+		return fmt.Errorf("Data format error while processing training information")
+	case strings.Contains(errStr, "context") || strings.Contains(errStr, "length"):
+		return fmt.Errorf("Training data too large to process in current context")
+	default:
+		return fmt.Errorf("Tool execution error: %w", err)
 	}
 }
 

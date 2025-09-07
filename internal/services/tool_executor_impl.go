@@ -10,7 +10,7 @@ import (
 
 	"bodda/internal/models"
 
-	"github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v2/responses"
 )
 
 // ToolExecutionService defines the interface for executing individual tools
@@ -253,14 +253,15 @@ func (te *toolExecutor) executeToolInternal(ctx context.Context, toolName string
 		return nil, fmt.Errorf("failed to marshal parameters: %w", err)
 	}
 
-	toolCall := openai.ToolCall{
-		ID:   fmt.Sprintf("call_%s", jobID),
-		Type: openai.ToolTypeFunction,
-		Function: openai.FunctionCall{
-			Name:      toolName,
-			Arguments: string(parametersJSON),
-		},
+	callID := fmt.Sprintf("call_%s", jobID)
+	toolCall := responses.ResponseFunctionToolCall{
+		ID:        callID,
+		CallID:    callID, // Use the same ID for CallID to ensure proper correlation
+		Name:      toolName,
+		Arguments: string(parametersJSON),
 	}
+
+	log.Printf("Created tool call for execution: tool=%s, job_id=%s, call_id=%s", toolName, jobID, callID)
 
 	// Execute the tool using existing AI service logic
 	toolResults, err := te.executeToolCall(ctx, msgCtx, toolCall)
@@ -299,16 +300,18 @@ func (te *toolExecutor) GetActiveJobCount() int {
 }
 
 // executeToolCall executes a single tool call using the existing AI service logic
-func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageContext, toolCall openai.ToolCall) ([]ToolResult, error) {
+func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageContext, toolCall responses.ResponseFunctionToolCall) ([]ToolResult, error) {
 	// This method reuses the existing tool execution logic from the AI service
 	// We need to access the private executeTools method, so we'll implement the logic here
 	
 	var results []ToolResult
 	result := ToolResult{
-		ToolCallID: toolCall.ID,
+		ToolCallID: toolCall.CallID,
 	}
 
-	switch toolCall.Function.Name {
+	log.Printf("Executing tool call: tool=%s, call_id=%s, item_id=%s", toolCall.Name, toolCall.CallID, toolCall.ID)
+
+	switch toolCall.Name {
 	case "get-athlete-profile":
 		content, err := te.toolService.ExecuteGetAthleteProfile(ctx, msgCtx)
 		if err != nil {
@@ -322,7 +325,7 @@ func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageCont
 		var args struct {
 			PerPage int `json:"per_page"`
 		}
-		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
 			result.Error = err.Error()
 			result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
 		} else {
@@ -342,7 +345,7 @@ func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageCont
 		var args struct {
 			ActivityID int64 `json:"activity_id"`
 		}
-		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
 			result.Error = err.Error()
 			result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
 		} else {
@@ -365,7 +368,7 @@ func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageCont
 			PageSize       int      `json:"page_size"`
 			SummaryPrompt  string   `json:"summary_prompt"`
 		}
-		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
 			result.Error = err.Error()
 			result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
 		} else {
@@ -399,7 +402,7 @@ func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageCont
 		var args struct {
 			Content string `json:"content"`
 		}
-		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		if err := json.Unmarshal([]byte(toolCall.Arguments), &args); err != nil {
 			result.Error = err.Error()
 			result.Content = fmt.Sprintf("Error parsing arguments: %v", err)
 		} else {
@@ -413,10 +416,14 @@ func (te *toolExecutor) executeToolCall(ctx context.Context, msgCtx *MessageCont
 		}
 
 	default:
-		result.Error = fmt.Sprintf("unknown tool: %s", toolCall.Function.Name)
-		result.Content = fmt.Sprintf("Tool '%s' is not supported", toolCall.Function.Name)
+		result.Error = fmt.Sprintf("unknown tool: %s", toolCall.Name)
+		result.Content = fmt.Sprintf("Tool '%s' is not supported", toolCall.Name)
 	}
 
 	results = append(results, result)
+	
+	log.Printf("Tool execution completed: tool=%s, call_id=%s, success=%t, result_call_id=%s", 
+		toolCall.Name, toolCall.CallID, result.Error == "", result.ToolCallID)
+	
 	return results, nil
 }

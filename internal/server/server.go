@@ -39,10 +39,10 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	stravaService := services.NewStravaService(cfg, repo.User)
 	logbookService := services.NewLogbookService(repo.Logbook)
 	chatService := services.NewChatService(repo)
-	aiService := services.NewAIService(cfg, stravaService, logbookService)
 
 	// Initialize tool services
 	toolRegistry := services.NewToolRegistry()
+	aiService := services.NewAIService(cfg, stravaService, logbookService, toolRegistry)
 	toolExecutionService := services.NewToolExecutionAdapter(aiService)
 	toolExecutor := services.NewToolExecutor(toolExecutionService, toolRegistry)
 	toolController := NewToolController(toolRegistry, toolExecutor, cfg)

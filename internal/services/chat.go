@@ -29,6 +29,7 @@ type ChatService interface {
 	UpdateSessionTitle(sessionID, title string) error
 	DeleteSession(sessionID string) error
 	SendMessage(sessionID, role, content string) (*models.Message, error)
+	SendMessageWithResponseID(sessionID, role, content string, responseID *string) (*models.Message, error)
 	GetMessages(sessionID string) ([]*models.Message, error)
 	GetMessagesWithPagination(sessionID string, limit, offset int) ([]*models.Message, error)
 	GetMessageCount(sessionID string) (int, error)
@@ -170,6 +171,47 @@ func (s *chatService) SendMessage(sessionID, role, content string) (*models.Mess
 		SessionID: sessionID,
 		Role:      role,
 		Content:   sanitizedContent,
+	}
+
+	err = s.repo.Message.Create(ctx, message)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create message: %w", err)
+	}
+
+	return message, nil
+}
+
+func (s *chatService) SendMessageWithResponseID(sessionID, role, content string, responseID *string) (*models.Message, error) {
+	ctx := context.Background()
+
+	// Validate inputs
+	if err := s.validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+
+	if err := s.validateRole(role); err != nil {
+		return nil, err
+	}
+
+	sanitizedContent, err := s.validateAndSanitizeContent(content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify session exists
+	_, err = s.repo.Session.GetByID(ctx, sessionID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+
+	message := &models.Message{
+		SessionID:  sessionID,
+		Role:       role,
+		Content:    sanitizedContent,
+		ResponseID: responseID,
 	}
 
 	err = s.repo.Message.Create(ctx, message)

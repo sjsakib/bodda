@@ -17,7 +17,7 @@ func TestToolDefinition(t *testing.T) {
 					"description": "Test parameter",
 				},
 			},
-			"required": []interface{}{"param1"},
+			"required": []string{"param1"},
 		},
 		Examples: []ToolExample{
 			{

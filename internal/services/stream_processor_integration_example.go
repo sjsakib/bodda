@@ -6,7 +6,8 @@ package services
 
 import (
 	"bodda/internal/config"
-	"github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v2/option"
 )
 
 // Example of how the stream processor would be integrated into the AI service
@@ -28,8 +29,8 @@ func ExampleStreamProcessorIntegration() {
 	streamProcessor := NewStreamProcessor(cfg)
 	
 	// Create summary processor (would use real OpenAI client in production)
-	client := openai.NewClient("mock-api-key")
-	summaryProcessor := NewSummaryProcessor(client)
+	client := openai.NewClient(option.WithAPIKey("mock-api-key"))
+	summaryProcessor := NewSummaryProcessor(&client)
 	
 	// Create processing mode dispatcher
 	dispatcher := NewProcessingModeDispatcher(streamProcessor, summaryProcessor)
@@ -108,8 +109,8 @@ func ExampleProcessingModes() {
 	}
 
 	streamProcessor := NewStreamProcessor(cfg)
-	client := openai.NewClient("mock-api-key")
-	summaryProcessor := NewSummaryProcessor(client)
+	client := openai.NewClient(option.WithAPIKey("mock-api-key"))
+	summaryProcessor := NewSummaryProcessor(&client)
 	dispatcher := NewProcessingModeDispatcher(streamProcessor, summaryProcessor)
 
 	// largeStreamData := createLargeStreamData(5000) // From test helper - function not implemented

@@ -16,10 +16,10 @@ func NewToolRegistry() ToolRegistry {
 	registry := &toolRegistry{
 		tools: make(map[string]models.ToolDefinition),
 	}
-	
+
 	// Initialize with existing tools from AI service
 	registry.initializeTools()
-	
+
 	return registry
 }
 
@@ -28,10 +28,10 @@ func NewToolRegistryWithAIService(aiService AIService) ToolRegistry {
 	registry := &toolRegistry{
 		tools: make(map[string]models.ToolDefinition),
 	}
-	
+
 	// Initialize with tools that match the AI service implementation
 	registry.initializeToolsFromAIService()
-	
+
 	return registry
 }
 
@@ -47,34 +47,35 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 		Name:        "get-athlete-profile",
 		Description: "Get the complete athlete profile from Strava including personal information, zones, and stats",
 		Parameters: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-			"required":   []interface{}{},
+			"type":                 "object",
+			"properties":           map[string]interface{}{},
+			"required":             []string{},
+			"additionalProperties": false,
 		},
 		Examples: []models.ToolExample{
 			{
 				Description: "Get current athlete profile with all available information",
 				Request:     map[string]interface{}{},
 				Response: map[string]interface{}{
-					"id":         12345,
-					"username":   "athlete_username",
-					"firstname":  "John",
-					"lastname":   "Doe",
-					"city":       "San Francisco",
-					"state":      "CA",
-					"country":    "United States",
-					"sex":        "M",
-					"premium":    true,
-					"created_at": "2020-01-01T00:00:00Z",
-					"updated_at": "2024-01-01T00:00:00Z",
-					"follower_count": 150,
-					"friend_count":   75,
-					"athlete_type":   1,
-					"date_preference": "%m/%d/%Y",
+					"id":                     12345,
+					"username":               "athlete_username",
+					"firstname":              "John",
+					"lastname":               "Doe",
+					"city":                   "San Francisco",
+					"state":                  "CA",
+					"country":                "United States",
+					"sex":                    "M",
+					"premium":                true,
+					"created_at":             "2020-01-01T00:00:00Z",
+					"updated_at":             "2024-01-01T00:00:00Z",
+					"follower_count":         150,
+					"friend_count":           75,
+					"athlete_type":           1,
+					"date_preference":        "%m/%d/%Y",
 					"measurement_preference": "feet",
-					"clubs": []interface{}{},
-					"ftp": 250,
-					"weight": 70.5,
+					"clubs":                  []interface{}{},
+					"ftp":                    250,
+					"weight":                 70.5,
 				},
 			},
 		},
@@ -95,7 +96,8 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 					"default":     30,
 				},
 			},
-			"required": []interface{}{},
+			"required":             []string{},
+			"additionalProperties": false,
 		},
 		Examples: []models.ToolExample{
 			{
@@ -104,18 +106,18 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 				Response: map[string]interface{}{
 					"activities": []interface{}{
 						map[string]interface{}{
-							"id":               123456789,
-							"name":             "Morning Run",
-							"distance":         5000.0,
-							"moving_time":      1800,
-							"elapsed_time":     1900,
+							"id":                   123456789,
+							"name":                 "Morning Run",
+							"distance":             5000.0,
+							"moving_time":          1800,
+							"elapsed_time":         1900,
 							"total_elevation_gain": 50.0,
-							"type":             "Run",
-							"start_date":       "2024-01-15T07:00:00Z",
-							"average_speed":    2.78,
-							"max_speed":        4.2,
-							"average_heartrate": 150.5,
-							"max_heartrate":    175,
+							"type":                 "Run",
+							"start_date":           "2024-01-15T07:00:00Z",
+							"average_speed":        2.78,
+							"max_speed":            4.2,
+							"average_heartrate":    150.5,
+							"max_heartrate":        175,
 						},
 					},
 					"count": 30,
@@ -146,7 +148,8 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 					"description": "The Strava activity ID",
 				},
 			},
-			"required": []interface{}{"activity_id"},
+			"required":             []string{"activity_id"},
+			"additionalProperties": false,
 		},
 		Examples: []models.ToolExample{
 			{
@@ -238,7 +241,8 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 					"description": "Custom prompt for AI summarization mode (required when processing_mode is 'ai-summary')",
 				},
 			},
-			"required": []interface{}{"activity_id"},
+			"required":             []string{"activity_id"},
+			"additionalProperties": false,
 		},
 		Examples: []models.ToolExample{
 			{
@@ -269,7 +273,7 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 					"resolution":   "high",
 				},
 				Response: map[string]interface{}{
-					"streams": "High resolution time series data for heartrate and watts",
+					"streams":         "High resolution time series data for heartrate and watts",
 					"processing_info": "Processing metadata",
 				},
 			},
@@ -282,7 +286,7 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 					"page_size":       500,
 				},
 				Response: map[string]interface{}{
-					"streams": "Second page of raw stream data (500 points)",
+					"streams":         "Second page of raw stream data (500 points)",
 					"processing_info": "Pagination metadata",
 				},
 			},
@@ -301,7 +305,8 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 					"description": "The complete logbook content as a string. You can structure this however you want - include athlete profile, training data, goals, preferences, health metrics, equipment, coaching insights, observations, and recommendations. Use any format that makes sense (plain text, markdown, etc.).",
 				},
 			},
-			"required": []interface{}{"content"},
+			"required":             []string{"content"},
+			"additionalProperties": false,
 		},
 		Examples: []models.ToolExample{
 			{
@@ -334,8 +339,8 @@ func (tr *toolRegistry) initializeToolsFromAIService() {
 Last updated: 2024-01-15`,
 				},
 				Response: map[string]interface{}{
-					"success": true,
-					"message": "Athlete logbook updated successfully",
+					"success":    true,
+					"message":    "Athlete logbook updated successfully",
 					"logbook_id": "logbook_12345",
 					"updated_at": "2024-01-15T10:30:00Z",
 				},
@@ -373,17 +378,21 @@ func (tr *toolRegistry) GetToolSchema(toolName string) (*models.ToolSchema, erro
 	// Extract required and optional parameters from the tool definition
 	required := []string{}
 	optional := []string{}
-	
+
 	if params, ok := tool.Parameters["properties"].(map[string]interface{}); ok {
 		requiredFields := []string{}
-		if reqArray, ok := tool.Parameters["required"].([]interface{}); ok {
+
+		// Handle both []string and []interface{} for backward compatibility
+		if reqArray, ok := tool.Parameters["required"].([]string); ok {
+			requiredFields = reqArray
+		} else if reqArray, ok := tool.Parameters["required"].([]interface{}); ok {
 			for _, req := range reqArray {
 				if reqStr, ok := req.(string); ok {
 					requiredFields = append(requiredFields, reqStr)
 				}
 			}
 		}
-		
+
 		for paramName := range params {
 			isRequired := false
 			for _, req := range requiredFields {
@@ -392,7 +401,7 @@ func (tr *toolRegistry) GetToolSchema(toolName string) (*models.ToolSchema, erro
 					break
 				}
 			}
-			
+
 			if isRequired {
 				required = append(required, paramName)
 			} else {
@@ -428,7 +437,7 @@ func (tr *toolRegistry) ValidateToolCall(toolName string, parameters map[string]
 	}
 
 	// Additional validation could be added here for parameter types, ranges, etc.
-	
+
 	return nil
 }
 

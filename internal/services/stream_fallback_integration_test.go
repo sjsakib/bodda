@@ -24,6 +24,24 @@ func (m *mockFailingSummaryProcessor) GenerateSummary(ctx context.Context, data 
 	}, nil
 }
 
+func (m *mockFailingSummaryProcessor) GenerateSummaryWithResponsesAPI(ctx context.Context, data *StravaStreams, activityID int64, prompt string) (*StreamSummary, error) {
+	if m.shouldFail {
+		return nil, errors.New("mock AI summary failure with Responses API")
+	}
+	return &StreamSummary{
+		ActivityID: activityID, SummaryPrompt: prompt, Summary: "Mock summary with Responses API", Model: "mock-model",
+	}, nil
+}
+
+func (m *mockFailingSummaryProcessor) ProcessStreamDataWithResponsesAPI(ctx context.Context, data *StravaStreams, activityID int64, prompt string) (*StreamSummary, error) {
+	if m.shouldFail {
+		return nil, errors.New("mock stream processing failure with Responses API")
+	}
+	return &StreamSummary{
+		ActivityID: activityID, SummaryPrompt: prompt, Summary: "Mock processed data with Responses API", Model: "mock-model",
+	}, nil
+}
+
 func (m *mockFailingSummaryProcessor) PrepareStreamDataForSummarization(data *StravaStreams) (string, error) {
 	return "prepared data", nil
 }

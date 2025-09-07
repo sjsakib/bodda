@@ -25,11 +25,12 @@ type Session struct {
 }
 
 type Message struct {
-	ID        string    `json:"id" db:"id"`
-	SessionID string    `json:"session_id" db:"session_id"`
-	Role      string    `json:"role" db:"role"` // "user" or "assistant"
-	Content   string    `json:"content" db:"content"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	ID         string    `json:"id" db:"id"`
+	SessionID  string    `json:"session_id" db:"session_id"`
+	Role       string    `json:"role" db:"role"` // "user" or "assistant"
+	Content    string    `json:"content" db:"content"`
+	ResponseID *string   `json:"response_id,omitempty" db:"response_id"` // OpenAI Response ID for multi-turn conversations
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
 }
 
 type AthleteLogbook struct {

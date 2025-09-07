@@ -1,12 +1,14 @@
 NOW
+
 - Strava Approval
   - Brand guideline
   - Link back to strava
-  - 
+  -
   - Privacy policy?
 - deploy
 
 BEFORE SUBMISSION
+
 - Make a demo video
 - MCP server
 - Use openAI responses API, possibly create an abstraction to use other LLMs including local models
@@ -14,8 +16,8 @@ BEFORE SUBMISSION
 - Fix session title
 - Update disclaimer
 
-
 NEXT PRIORITY
+
 - Prompting
   - Link youtube search keyword for drills
   - instruct to use nicer formatting

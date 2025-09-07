@@ -41,7 +41,18 @@ This feature involves migrating the current OpenAI integration from the completi
 
 ### Requirement 4
 
-**User Story:** As a developer, I want to understand the differences between the old and new API implementations, so that I can maintain and extend the system effectively.
+**User Story:** As a developer, I want to completely remove the legacy completion API implementation once the responses API is validated, so that the codebase is clean and maintainable without deprecated dependencies.
+
+#### Acceptance Criteria
+
+1. WHEN the responses API is fully validated THEN the legacy completion API code SHALL be completely removed
+2. WHEN the migration is complete THEN the third-party OpenAI SDK dependency SHALL be removed from the project
+3. WHEN the cleanup is finished THEN no feature flags or routing logic for the old API SHALL remain
+4. WHEN reviewing the final code THEN only the official OpenAI SDK and responses API SHALL be present
+
+### Requirement 5
+
+**User Story:** As a developer, I want comprehensive documentation of the migration process, so that I can understand the changes and maintain the system effectively.
 
 #### Acceptance Criteria
 
