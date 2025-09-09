@@ -14,6 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// MockSessionRepository for testing
+type MockSessionRepository struct{}
+
+func (m *MockSessionRepository) UpdateLastResponseID(ctx context.Context, sessionID string, responseID string) error {
+	return nil // Simple mock that always succeeds
+}
+
 // TestCallIDExtractionEndToEndFlow tests the complete tool call processing pipeline with correct call_id usage
 func TestCallIDExtractionEndToEndFlow(t *testing.T) {
 	// Create test configuration
@@ -33,8 +40,11 @@ func TestCallIDExtractionEndToEndFlow(t *testing.T) {
 	mockLogbookService := &mockLogbookServiceForIntegration{}
 	mockToolRegistry := NewToolRegistry()
 	
+	// Create mock session repository
+	mockSessionRepo := &MockSessionRepositoryForCallID{}
+	
 	// Create AI service
-	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry).(*aiService)
+	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockSessionRepo, mockToolRegistry).(*aiService)
 
 	t.Run("complete tool call processing pipeline with correct call_id usage", func(t *testing.T) {
 		// Test data with realistic call_id values
@@ -214,9 +224,10 @@ func TestMultiTurnConversationWithCallIDTracking(t *testing.T) {
 	mockStravaService := &mockStravaServiceForIntegration{}
 	mockLogbookService := &mockLogbookServiceForIntegration{}
 	mockToolRegistry := NewToolRegistry()
+	mockSessionRepo := &MockSessionRepository{}
 
 	// Create AI service
-	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry).(*aiService)
+	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockSessionRepo, mockToolRegistry).(*aiService)
 
 	t.Run("multi-turn conversation with proper call_id tracking", func(t *testing.T) {
 		ctx := context.Background()
@@ -343,9 +354,10 @@ func TestErrorRecoveryAndFallbackScenarios(t *testing.T) {
 	mockStravaService := &mockStravaServiceForIntegration{}
 	mockLogbookService := &mockLogbookServiceForIntegration{}
 	mockToolRegistry := NewToolRegistry()
+	mockSessionRepo := &MockSessionRepository{}
 
 	// Create AI service
-	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry).(*aiService)
+	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockSessionRepo, mockToolRegistry).(*aiService)
 
 	t.Run("fallback to item_id when call_id is missing", func(t *testing.T) {
 		state := NewToolCallState()
@@ -374,9 +386,10 @@ func TestErrorRecoveryAndFallbackScenarios(t *testing.T) {
 		failingStravaService := &failingMockStravaService{}
 		failingLogbookService := &mockLogbookServiceForIntegration{}
 		mockToolRegistry := NewToolRegistry()
+		mockSessionRepo := &MockSessionRepository{}
 		
 		// Create AI service with failing mock
-		failingAIService := NewAIService(cfg, failingStravaService, failingLogbookService, mockToolRegistry)
+		failingAIService := NewAIService(cfg, failingStravaService, failingLogbookService, mockSessionRepo, mockToolRegistry)
 		
 		ctx := context.Background()
 		msgCtx := &MessageContext{
@@ -739,4 +752,11 @@ func (m *mockToolRegistryForIntegration) ValidateToolCall(toolName string, param
 
 func (m *mockToolRegistryForIntegration) IsToolAvailable(toolName string) bool {
 	return true
+}
+
+// MockSessionRepositoryForCallID for testing
+type MockSessionRepositoryForCallID struct{}
+
+func (m *MockSessionRepositoryForCallID) UpdateLastResponseID(ctx context.Context, sessionID string, responseID string) error {
+	return nil // Simple mock that always succeeds
 }

@@ -42,7 +42,7 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 
 	// Initialize tool services
 	toolRegistry := services.NewToolRegistry()
-	aiService := services.NewAIService(cfg, stravaService, logbookService, toolRegistry)
+	aiService := services.NewAIService(cfg, stravaService, logbookService, repo.Session, toolRegistry)
 	toolExecutionService := services.NewToolExecutionAdapter(aiService)
 	toolExecutor := services.NewToolExecutor(toolExecutionService, toolRegistry)
 	toolController := NewToolController(toolRegistry, toolExecutor, cfg)
@@ -535,6 +535,23 @@ func (s *Server) sendMessage(c *gin.Context) {
 		log.Printf("No logbook found for user %s: %v", userModel.ID, err)
 	}
 
+	// Get session to retrieve last_response_id for multi-turn conversation context
+	session, err2 := s.chatService.GetSession(sessionID)
+	if err2 != nil {
+		log.Printf("Error getting session for last_response_id: %v", err2)
+		c.JSON(500, gin.H{
+			"error": "Failed to get session",
+			"code":  "SESSION_ERROR",
+		})
+		return
+	}
+
+	// Extract last_response_id from session for AI context
+	var lastResponseID string
+	if session.LastResponseID != nil {
+		lastResponseID = *session.LastResponseID
+	}
+
 	msgCtx := &services.MessageContext{
 		UserID:              userModel.ID,
 		SessionID:           sessionID,
@@ -542,6 +559,7 @@ func (s *Server) sendMessage(c *gin.Context) {
 		ConversationHistory: messages[:len(messages)-1], // Exclude the just-added user message
 		AthleteLogbook:      logbook,
 		User:                userModel,
+		LastResponseID:      lastResponseID,
 	}
 
 	// Get AI response synchronously for this endpoint
@@ -581,8 +599,13 @@ func (s *Server) sendMessage(c *gin.Context) {
 		return
 	}
 
-	// Save AI response
-	assistantMessage, err := s.chatService.SendMessage(sessionID, "assistant", aiResponse)
+	// Save AI response with response ID for multi-turn conversation tracking
+	var responseIDPtr *string
+	if msgCtx.LastResponseID != "" {
+		responseIDPtr = &msgCtx.LastResponseID
+	}
+	
+	assistantMessage, err := s.chatService.SendMessageWithResponseID(sessionID, "assistant", aiResponse, responseIDPtr)
 	if err != nil {
 		log.Printf("Error saving AI response: %v", err)
 		c.JSON(500, gin.H{
@@ -678,6 +701,24 @@ func (s *Server) streamResponse(c *gin.Context) {
 		log.Printf("No logbook found for user %s: %v", userModel.ID, err)
 	}
 
+	// Get session to retrieve last_response_id for multi-turn conversation context
+	session, err2 := s.chatService.GetSession(sessionID)
+	if err2 != nil {
+		log.Printf("Error getting session for last_response_id: %v", err2)
+		errorEvent := map[string]interface{}{
+			"type":    "error",
+			"message": "failed to get session",
+		}
+		c.SSEvent("message", errorEvent)
+		return
+	}
+
+	// Extract last_response_id from session for AI context
+	var lastResponseID string
+	if session.LastResponseID != nil {
+		lastResponseID = *session.LastResponseID
+	}
+
 	msgCtx := &services.MessageContext{
 		UserID:              userModel.ID,
 		SessionID:           sessionID,
@@ -685,6 +726,7 @@ func (s *Server) streamResponse(c *gin.Context) {
 		ConversationHistory: messages[:len(messages)-1], // Exclude the just-added user message
 		AthleteLogbook:      logbook,
 		User:                userModel,
+		LastResponseID:      lastResponseID,
 	}
 
 	responseChan, err := s.aiService.ProcessMessage(ctx, msgCtx)
@@ -710,8 +752,13 @@ func (s *Server) streamResponse(c *gin.Context) {
 		c.Writer.Flush()
 	}
 
-	// Save complete AI response
-	assistantMessage, err := s.chatService.SendMessage(sessionID, "assistant", fullResponse)
+	// Save complete AI response with response ID for multi-turn conversation tracking
+	var responseIDPtr *string
+	if msgCtx.LastResponseID != "" {
+		responseIDPtr = &msgCtx.LastResponseID
+	}
+	
+	assistantMessage, err := s.chatService.SendMessageWithResponseID(sessionID, "assistant", fullResponse, responseIDPtr)
 	if err != nil {
 		log.Printf("Error saving AI response: %v", err)
 		errorEvent := map[string]interface{}{

@@ -9,6 +9,13 @@ import (
 	"bodda/internal/models"
 )
 
+// MockSessionRepositoryForToolExecutor for testing
+type MockSessionRepositoryForToolExecutor struct{}
+
+func (m *MockSessionRepositoryForToolExecutor) UpdateLastResponseID(ctx context.Context, sessionID string, responseID string) error {
+	return nil // Simple mock that always succeeds
+}
+
 func TestToolExecutorIntegrationWithAIService(t *testing.T) {
 	// Skip if no OpenAI API key is available
 	cfg := &config.Config{
@@ -21,9 +28,10 @@ func TestToolExecutorIntegrationWithAIService(t *testing.T) {
 
 	// Create tool registry first
 	mockToolRegistry := NewToolRegistry()
+	mockSessionRepo := &MockSessionRepositoryForToolExecutor{}
 	
 	// Create AI service (this will use mock services)
-	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry)
+	aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockSessionRepo, mockToolRegistry)
 
 	// Create tool registry and executor
 	registry := NewToolRegistryWithAIService(aiService)

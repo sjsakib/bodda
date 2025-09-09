@@ -14,6 +14,7 @@ func RunMigrations(db *pgxpool.Pool) error {
 		createMessagesTable,
 		createAthleteLogbooksTable,
 		addResponseIdToMessages,
+		addLastResponseIdToSessions,
 	}
 
 	for i, migration := range migrations {
@@ -67,3 +68,7 @@ CREATE TABLE IF NOT EXISTS athlete_logbooks (
 const addResponseIdToMessages = `
 ALTER TABLE messages 
 ADD COLUMN IF NOT EXISTS response_id TEXT;`
+
+const addLastResponseIdToSessions = `
+ALTER TABLE sessions 
+ADD COLUMN IF NOT EXISTS last_response_id TEXT;`

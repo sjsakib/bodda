@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import LandingPage from '../LandingPage';
@@ -61,7 +61,7 @@ describe('LandingPage', () => {
   it('renders the main heading and description', async () => {
     await renderLandingPage();
 
-    expect(screen.getByRole('heading', { name: /bodda/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Bodda');
     expect(
       screen.getByText(/your ai-powered running and cycling coach/i)
     ).toBeInTheDocument();
@@ -72,7 +72,7 @@ describe('LandingPage', () => {
 
     const connectButton = screen.getByTestId('strava-connect-button');
     expect(connectButton).toBeInTheDocument();
-    expect(connectButton).toHaveTextContent(/connect with strava/i);
+    expect(connectButton.querySelector('img')).toHaveAttribute('alt', 'Connect with Strava');
   });
 
   it('displays the disclaimer section', async () => {
@@ -92,8 +92,12 @@ describe('LandingPage', () => {
     expect(screen.getByText(/continuous learning/i)).toBeInTheDocument();
   });
 
-  it('redirects to Strava OAuth when connect button is clicked', async () => {
+  it('redirects to Strava OAuth when connect button is clicked with consent', async () => {
     await renderLandingPage();
+
+    // First check the consent checkbox
+    const consentCheckbox = screen.getByTestId('consent-checkbox');
+    fireEvent.click(consentCheckbox);
 
     const connectButton = screen.getByTestId('strava-connect-button');
     fireEvent.click(connectButton);
@@ -105,6 +109,10 @@ describe('LandingPage', () => {
 
   it('shows loading state when connecting to Strava', async () => {
     await renderLandingPage();
+
+    // First check the consent checkbox
+    const consentCheckbox = screen.getByTestId('consent-checkbox');
+    fireEvent.click(consentCheckbox);
 
     const connectButton = screen.getByTestId('strava-connect-button');
     fireEvent.click(connectButton);
@@ -160,6 +168,10 @@ describe('LandingPage', () => {
 
     await renderLandingPage();
 
+    // First check the consent checkbox
+    const consentCheckbox = screen.getByTestId('consent-checkbox');
+    fireEvent.click(consentCheckbox);
+
     const connectButton = screen.getByTestId('strava-connect-button');
     fireEvent.click(connectButton);
 
@@ -181,18 +193,71 @@ describe('LandingPage', () => {
     expect(connectButton).toBeInTheDocument();
 
     // Check that headings are properly structured
-    const mainHeading = screen.getByRole('heading', { name: /bodda/i });
+    const mainHeading = screen.getByRole('heading', { level: 1 });
     expect(mainHeading).toBeInTheDocument();
+  });
+
+  it('displays consent checkbox and links to legal pages', async () => {
+    await renderLandingPage();
+
+    const consentCheckbox = screen.getByTestId('consent-checkbox');
+    expect(consentCheckbox).toBeInTheDocument();
+    expect(consentCheckbox).not.toBeChecked();
+
+    // Find the privacy policy link within the consent section
+    const consentLabel = consentCheckbox.closest('div');
+    const privacyLink = within(consentLabel!).getByRole('link', { name: /privacy policy/i });
+    expect(privacyLink).toBeInTheDocument();
+    expect(privacyLink).toHaveAttribute('href', '/privacy');
+
+    const termsLink = within(consentLabel!).getByRole('link', { name: /terms of service/i });
+    expect(termsLink).toBeInTheDocument();
+    expect(termsLink).toHaveAttribute('href', '/terms');
+  });
+
+  it('disables connect button when consent is not accepted', async () => {
+    await renderLandingPage();
+
+    const connectButton = screen.getByTestId('strava-connect-button');
+    expect(connectButton).toBeDisabled();
+    expect(connectButton).toHaveClass('opacity-50', 'cursor-not-allowed');
+  });
+
+  it('enables connect button when consent is accepted', async () => {
+    await renderLandingPage();
+
+    const consentCheckbox = screen.getByTestId('consent-checkbox');
+    const connectButton = screen.getByTestId('strava-connect-button');
+
+    // Initially disabled
+    expect(connectButton).toBeDisabled();
+
+    // Enable after checking consent
+    fireEvent.click(consentCheckbox);
+    expect(connectButton).not.toBeDisabled();
+    expect(connectButton).not.toHaveClass('opacity-50', 'cursor-not-allowed');
+  });
+
+  it('prevents connection without consent through disabled button', async () => {
+    await renderLandingPage();
+
+    const connectButton = screen.getByTestId('strava-connect-button');
+    
+    // The button should be disabled when consent is not given
+    expect(connectButton).toBeDisabled();
+    
+    // Verify the button has the disabled styling
+    expect(connectButton).toHaveClass('opacity-50', 'cursor-not-allowed');
   });
 
   it('is responsive and includes proper CSS classes', async () => {
     await renderLandingPage();
 
-    const mainHeading = screen.getByRole('heading', { name: /^bodda$/i });
+    const mainHeading = screen.getByRole('heading', { level: 1 });
     const container = mainHeading.closest('div');
     expect(container?.parentElement?.parentElement).toHaveClass('min-h-screen');
 
     const connectButton = screen.getByTestId('strava-connect-button');
-    expect(connectButton).toHaveClass('bg-orange-500', 'hover:bg-orange-600');
+    expect(connectButton).toHaveClass('shadow-lg', 'hover:shadow-xl');
   });
 });

@@ -19,13 +19,14 @@ func NewSessionRepository(db *pgxpool.Pool) *SessionRepository {
 
 func (r *SessionRepository) Create(ctx context.Context, session *models.Session) error {
 	query := `
-		INSERT INTO sessions (user_id, title)
-		VALUES ($1, $2)
+		INSERT INTO sessions (user_id, title, last_response_id)
+		VALUES ($1, $2, $3)
 		RETURNING id, created_at, updated_at`
 
 	err := r.db.QueryRow(ctx, query,
 		session.UserID,
 		session.Title,
+		session.LastResponseID,
 	).Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
 
 	if err != nil {
@@ -38,13 +39,14 @@ func (r *SessionRepository) Create(ctx context.Context, session *models.Session)
 func (r *SessionRepository) GetByID(ctx context.Context, id string) (*models.Session, error) {
 	session := &models.Session{}
 	query := `
-		SELECT id, user_id, title, created_at, updated_at
+		SELECT id, user_id, title, last_response_id, created_at, updated_at
 		FROM sessions WHERE id = $1`
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&session.ID,
 		&session.UserID,
 		&session.Title,
+		&session.LastResponseID,
 		&session.CreatedAt,
 		&session.UpdatedAt,
 	)
@@ -61,7 +63,7 @@ func (r *SessionRepository) GetByID(ctx context.Context, id string) (*models.Ses
 
 func (r *SessionRepository) GetByUserID(ctx context.Context, userID string) ([]*models.Session, error) {
 	query := `
-		SELECT id, user_id, title, created_at, updated_at
+		SELECT id, user_id, title, last_response_id, created_at, updated_at
 		FROM sessions 
 		WHERE user_id = $1 
 		ORDER BY updated_at DESC`
@@ -79,6 +81,7 @@ func (r *SessionRepository) GetByUserID(ctx context.Context, userID string) ([]*
 			&session.ID,
 			&session.UserID,
 			&session.Title,
+			&session.LastResponseID,
 			&session.CreatedAt,
 			&session.UpdatedAt,
 		)
@@ -109,6 +112,24 @@ func (r *SessionRepository) Update(ctx context.Context, session *models.Session)
 
 	if err != nil {
 		return fmt.Errorf("failed to update session: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SessionRepository) UpdateLastResponseID(ctx context.Context, sessionID string, responseID string) error {
+	query := `
+		UPDATE sessions 
+		SET last_response_id = $2, updated_at = NOW()
+		WHERE id = $1`
+
+	result, err := r.db.Exec(ctx, query, sessionID, responseID)
+	if err != nil {
+		return fmt.Errorf("failed to update session last_response_id: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("session not found")
 	}
 
 	return nil

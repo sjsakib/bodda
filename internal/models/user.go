@@ -17,11 +17,12 @@ type User struct {
 }
 
 type Session struct {
-	ID        string    `json:"id" db:"id"`
-	UserID    string    `json:"user_id" db:"user_id"`
-	Title     string    `json:"title" db:"title"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	ID             string    `json:"id" db:"id"`
+	UserID         string    `json:"user_id" db:"user_id"`
+	Title          string    `json:"title" db:"title"`
+	LastResponseID *string   `json:"last_response_id,omitempty" db:"last_response_id"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type Message struct {

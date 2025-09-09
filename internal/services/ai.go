@@ -20,6 +20,11 @@ import (
 	"github.com/openai/openai-go/v2/responses"
 )
 
+// SessionRepository interface for session operations needed by AI service
+type SessionRepository interface {
+	UpdateLastResponseID(ctx context.Context, sessionID string, responseID string) error
+}
+
 // MessageContext contains all the context needed for AI processing
 type MessageContext struct {
 	UserID              string
@@ -102,6 +107,7 @@ type aiService struct {
 	client               openai.Client // Official OpenAI SDK client
 	stravaService        StravaService
 	logbookService       LogbookService
+	sessionRepository    SessionRepository
 	formatter            OutputFormatter
 	config               *config.Config
 	streamProcessor      StreamProcessor
@@ -113,7 +119,7 @@ type aiService struct {
 }
 
 // NewAIService creates a new AI service instance
-func NewAIService(cfg *config.Config, stravaService StravaService, logbookService LogbookService, toolRegistry ToolRegistry) AIService {
+func NewAIService(cfg *config.Config, stravaService StravaService, logbookService LogbookService, sessionRepository SessionRepository, toolRegistry ToolRegistry) AIService {
 	// Initialize OpenAI client
 	client := openai.NewClient(option.WithAPIKey(cfg.OpenAIAPIKey))
 
@@ -149,6 +155,7 @@ func NewAIService(cfg *config.Config, stravaService StravaService, logbookServic
 		client:               client,
 		stravaService:        stravaService,
 		logbookService:       logbookService,
+		sessionRepository:    sessionRepository,
 		formatter:            outputFormatter,
 		config:               cfg,
 		streamProcessor:      streamProcessor,
@@ -282,13 +289,13 @@ func (s *aiService) getAvailableTools() []responses.ToolUnionParam {
 	for _, tool := range registryTools {
 		convertedTool := s.convertToolDefinitionToOpenAI(tool)
 		openAITools = append(openAITools, convertedTool)
-		
-		slog.Debug("Converted tool from registry to OpenAI format", 
+
+		slog.Debug("Converted tool from registry to OpenAI format",
 			"tool_name", tool.Name,
 			"description", tool.Description)
 	}
 
-	slog.Info("Successfully loaded tools from registry", 
+	slog.Info("Successfully loaded tools from registry",
 		"tool_count", len(openAITools),
 		"implementation", "registry_based")
 
@@ -302,7 +309,7 @@ func (s *aiService) convertToolDefinitionToOpenAI(tool models.ToolDefinition) re
 	for k, v := range tool.Parameters {
 		params[k] = v
 	}
-	
+
 	// OpenAI requires ALL properties to be listed in the required array
 	// even if they're optional parameters with defaults
 	if properties, ok := params["properties"].(map[string]interface{}); ok && len(properties) > 0 {
@@ -312,7 +319,7 @@ func (s *aiService) convertToolDefinitionToOpenAI(tool models.ToolDefinition) re
 		}
 		params["required"] = allPropertyNames
 	}
-	
+
 	return responses.ToolParamOfFunction(
 		tool.Name,
 		params,
@@ -329,33 +336,60 @@ func (s *aiService) processMessageWithResponsesAPI(ctx context.Context, processo
 	tools := s.getAvailableTools()
 
 	for {
-		// Apply context redaction before creating the request
-		redactedMessages := processor.Messages
+		// Build input items for this iteration
+		var inputItems []responses.ResponseInputItemUnionParam
+		
+		// For first iteration or when no response ID is available, include conversation context
+		if processor.Context.LastResponseID == "" {
+			inputItems = processor.Messages
+		} else {
+			// For subsequent iterations with response ID, only include new user message and tool results
+			inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(
+				processor.Context.Message,
+				responses.EasyInputMessageRoleUser,
+			))
+			
+			// Add tool results from previous iteration if any
+			if processor.CurrentRound > 0 && len(processor.ToolResults) > 0 {
+				lastRoundResults := processor.ToolResults[len(processor.ToolResults)-1]
+				for _, result := range lastRoundResults {
+					if result.ToolCallID != "" {
+						inputItems = append(inputItems, responses.ResponseInputItemParamOfFunctionCallOutput(
+							result.ToolCallID,
+							result.Content,
+						))
+					}
+				}
+			}
+		}
 
-		// Use messages directly in Responses API format
-		inputItems := redactedMessages
-
-		// Create responses API request
+		// Create responses API request with system prompt as Instructions
+		systemPrompt := s.buildEnhancedSystemPrompt(processor.Context)
 		params := responses.ResponseNewParams{
 			Model: responses.ChatModelGPT5,
 			Input: responses.ResponseNewParamsInputUnion{
 				OfInputItemList: inputItems,
 			},
-			Tools:              tools,
+			Tools:        tools,
+			Instructions: param.NewOpt(systemPrompt),
 		}
 
 		// Check if we have a previous response ID to reference
 		if processor.Context.LastResponseID != "" {
 			slog.Info("Including previous response ID in request context",
 				"previous_response_id", processor.Context.LastResponseID)
-			// TODO: Add previous response ID to params when SDK supports it
-			// This might be a field like params.PreviousResponseID = processor.Context.LastResponseID
 			params.PreviousResponseID = param.NewOpt(processor.Context.LastResponseID)
 		}
 
-		slog.InfoContext(ctx, "Calling LLM with Responses API", "message_count", len(redactedMessages))
+		slog.InfoContext(ctx, "Calling LLM with Responses API", 
+			"message_count", len(inputItems),
+			"has_response_id", processor.Context.LastResponseID != "",
+			"iteration", processor.CurrentRound)
 
 		stream := s.client.Responses.NewStreaming(ctx, params)
+
+		// Clear processor messages after each call since Responses API uses LastResponseID for context
+		processor.Messages = []responses.ResponseInputItemUnionParam{}
 
 		var responseContent strings.Builder
 		var hasContent bool
@@ -373,6 +407,22 @@ func (s *aiService) processMessageWithResponsesAPI(ctx context.Context, processo
 			slog.Info("Captured response ID for multi-turn conversation", "response_id", responseID)
 			// Store this in the processor context for later use when saving the assistant message
 			processor.Context.LastResponseID = responseID
+
+			// Update session's last_response_id for future multi-turn context
+			if processor.Context.SessionID != "" {
+				err := s.sessionRepository.UpdateLastResponseID(ctx, processor.Context.SessionID, responseID)
+				if err != nil {
+					slog.Error("Failed to update session last_response_id",
+						"session_id", processor.Context.SessionID,
+						"response_id", responseID,
+						"error", err)
+					// Don't fail the request if session update fails, just log the error
+				} else {
+					slog.Info("Successfully updated session last_response_id",
+						"session_id", processor.Context.SessionID,
+						"response_id", responseID)
+				}
+			}
 		}
 
 		// Determine next action based on tool calls and analysis depth
@@ -421,37 +471,20 @@ func (s *aiService) processMessageWithResponsesAPI(ctx context.Context, processo
 }
 
 // buildConversationContextForResponsesAPI creates conversation context directly in Responses API format
-// Following OpenAI Responses API multi-turn pattern: include previous response ID instead of all messages
+// Following OpenAI Responses API multi-turn pattern: only include new user message when previous response ID is available
 func (s *aiService) buildConversationContextForResponsesAPI(msgCtx *MessageContext) []responses.ResponseInputItemUnionParam {
 	var inputItems []responses.ResponseInputItemUnionParam
 
-	// Add system prompt as user message with system context
-	systemPrompt := s.buildEnhancedSystemPrompt(msgCtx)
-	inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(
-		fmt.Sprintf("System: %s", systemPrompt),
-		responses.EasyInputMessageRoleUser,
-	))
+	// With Responses API, we only need to include the current user message
+	// Previous conversation context is handled via LastResponseID parameter
+	// System prompt is passed separately as Instructions parameter
+	
+	// Only include conversation history if we don't have a previous response ID
+	if msgCtx.LastResponseID == "" && len(msgCtx.ConversationHistory) > 0 {
+		slog.Info("No previous response ID available, including recent conversation history for context",
+			"conversation_length", len(msgCtx.ConversationHistory))
 
-	// For multi-turn conversations, use previous response ID instead of all messages
-	// This follows the OpenAI Responses API pattern for efficient multi-turn handling
-	if len(msgCtx.ConversationHistory) > 0 {
-		// Find the most recent assistant message with a response ID
-		var previousResponseID *string
-		for i := len(msgCtx.ConversationHistory) - 1; i >= 0; i-- {
-			msg := msgCtx.ConversationHistory[i]
-			if msg.Role == "assistant" && msg.ResponseID != nil && *msg.ResponseID != "" {
-				previousResponseID = msg.ResponseID
-				break
-			}
-		}
-
-		// For now, include recent conversation history for context
-		// TODO: Implement proper previous response ID reference when SDK method is available
-		slog.Info("Including recent conversation history for context",
-			"conversation_length", len(msgCtx.ConversationHistory),
-			"has_previous_response_id", previousResponseID != nil)
-
-		// Include only the last few messages to maintain context
+		// Include only the last few messages to maintain context for first interaction
 		recentMessages := msgCtx.ConversationHistory
 		if len(recentMessages) > 4 { // Limit to last 4 messages for efficiency
 			recentMessages = recentMessages[len(recentMessages)-4:]
@@ -468,9 +501,13 @@ func (s *aiService) buildConversationContextForResponsesAPI(msgCtx *MessageConte
 				role,
 			))
 		}
+	} else if msgCtx.LastResponseID != "" {
+		slog.Info("Using previous response ID for conversation context, skipping message history",
+			"previous_response_id", msgCtx.LastResponseID,
+			"conversation_length", len(msgCtx.ConversationHistory))
 	}
 
-	// Add current message with analysis context
+	// Add current message
 	inputItems = append(inputItems, responses.ResponseInputItemParamOfMessage(
 		msgCtx.Message,
 		responses.EasyInputMessageRoleUser,
@@ -491,7 +528,7 @@ func (s *aiService) processResponsesAPIStreamWithID(stream *ssestream.Stream[res
 		event := stream.Current()
 
 		// Log event type for debugging with enhanced context
-		slog.Debug("Processing Responses API event", 
+		slog.Debug("Processing Responses API event",
 			"event_type", event.Type,
 			"stream_position", "active",
 			"tool_calls_tracked", len(toolCallState.toolCalls))
@@ -516,8 +553,8 @@ func (s *aiService) processResponsesAPIStreamWithID(stream *ssestream.Stream[res
 		case "response.function_call_arguments.delta", "response.function_call.completed", "response.function_call.started":
 			// Handle tool call related events using the new parseToolCallsFromEvents method
 			if err := s.parseToolCallsFromEvents(event, toolCallState); err != nil {
-				slog.Error("Error processing tool call event with call_id context", 
-					"event_type", event.Type, 
+				slog.Error("Error processing tool call event with call_id context",
+					"event_type", event.Type,
 					"error", err,
 					"active_call_ids", s.getActiveCallIDs(toolCallState),
 					"total_tool_calls", len(toolCallState.toolCalls))
@@ -528,7 +565,7 @@ func (s *aiService) processResponsesAPIStreamWithID(stream *ssestream.Stream[res
 			// Handle completion event - finalize all accumulated tool calls and capture response ID
 			completedEvent := event.AsResponseCompleted()
 			completedToolCalls := s.GetCompletedToolCalls(toolCallState)
-			
+
 			// Enhanced completion summary logging with all processed call_id values
 			allCallIDs := s.getAllCallIDs(toolCallState)
 			slog.Info("Response completed, finalizing tool calls with comprehensive summary",
@@ -541,7 +578,7 @@ func (s *aiService) processResponsesAPIStreamWithID(stream *ssestream.Stream[res
 			// Capture the response ID for multi-turn conversations
 			if completedEvent.Response.ID != "" && responseID != nil {
 				*responseID = completedEvent.Response.ID
-				slog.Info("Captured response ID for multi-turn conversation with call_id context", 
+				slog.Info("Captured response ID for multi-turn conversation with call_id context",
 					"response_id", completedEvent.Response.ID,
 					"associated_call_ids", allCallIDs)
 			}
@@ -559,13 +596,13 @@ func (s *aiService) processResponsesAPIStreamWithID(stream *ssestream.Stream[res
 					"arguments", toolCall.Arguments,
 					"item_id", toolCall.ID)
 			}
-			
+
 			// Log completion summary with all call_id values processed
 			slog.Info("Tool call processing pipeline completed successfully",
 				"total_processed_call_ids", len(allCallIDs),
 				"successful_completions", len(completedToolCalls),
 				"call_id_summary", allCallIDs)
-			
+
 			return nil
 
 		case "error":
@@ -705,9 +742,9 @@ func getMapKeys(m map[string]interface{}) []string {
 
 // ToolCallState manages the state of tool calls during event-based processing
 type ToolCallState struct {
-	toolCalls map[string]*responses.ResponseFunctionToolCall // keyed by call_id
-	completed map[string]bool                                // keyed by call_id
-	itemToCallID map[string]string                           // maps item_id to call_id for delta event processing
+	toolCalls    map[string]*responses.ResponseFunctionToolCall // keyed by call_id
+	completed    map[string]bool                                // keyed by call_id
+	itemToCallID map[string]string                              // maps item_id to call_id for delta event processing
 }
 
 // NewToolCallState creates a new tool call state manager
@@ -774,10 +811,10 @@ func (s *aiService) handleFunctionCallArgumentsDelta(event responses.ResponseFun
 		// Implement fallback to use item_id as call_id when mapping is not found
 		// This can happen if delta events arrive before output_item.added events
 		callID = itemID
-		
+
 		// Store the fallback mapping for consistency
 		state.itemToCallID[itemID] = callID
-		
+
 		slog.Warn("Function call arguments delta processing using fallback: no call_id mapping found, using item_id as call_id",
 			"item_id", itemID,
 			"fallback_call_id", callID,
@@ -786,7 +823,7 @@ func (s *aiService) handleFunctionCallArgumentsDelta(event responses.ResponseFun
 			"available_mappings", len(state.itemToCallID),
 			"fallback_reason", "missing_call_id_mapping")
 	}
-	
+
 	slog.Debug("Processing function call arguments delta with call_id traceability",
 		"call_id", callID,
 		"item_id", itemID,
@@ -809,7 +846,7 @@ func (s *aiService) handleFunctionCallArgumentsDelta(event responses.ResponseFun
 			"call_id", callID,
 			"item_id", itemID,
 			"initial_delta", event.Delta)
-		
+
 		toolCall := &responses.ResponseFunctionToolCall{
 			ID:        itemID,
 			CallID:    callID,
@@ -817,7 +854,7 @@ func (s *aiService) handleFunctionCallArgumentsDelta(event responses.ResponseFun
 			Arguments: event.Delta,
 		}
 		state.toolCalls[callID] = toolCall
-		
+
 		slog.Info("Created new function call from arguments delta using correct call_id",
 			"call_id", callID,
 			"item_id", itemID,
@@ -850,7 +887,7 @@ func (s *aiService) handleFunctionCallStarted(event responses.ResponseStreamEven
 	// Note: The exact structure may vary based on the actual API response format
 	slog.Debug("Function call start event received", "event_type", event.Type)
 
-	fmt.Println("function call started");
+	fmt.Println("function call started")
 	fmt.Println(event.JSON)
 
 	// This would need to be implemented based on the actual event structure
@@ -863,7 +900,7 @@ func (s *aiService) handleFunctionCallStarted(event responses.ResponseStreamEven
 func (s *aiService) handleOutputItemAdded(event responses.ResponseStreamEventUnion, state *ToolCallState) error {
 	// Use event.AsResponseOutputItemAdded() to get the typed event structure
 	outputItemEvent := event.AsResponseOutputItemAdded()
-	
+
 	slog.Info("Processing output item added event",
 		"event_type", event.Type,
 		"item_id", outputItemEvent.Item.ID,
@@ -889,7 +926,7 @@ func (s *aiService) handleOutputItemAdded(event responses.ResponseStreamEventUni
 			"item_type", outputItemEvent.Item.Type,
 			"function_name", outputItemEvent.Item.Name,
 			"event_structure", fmt.Sprintf("%+v", outputItemEvent.Item))
-		
+
 		// Implement fallback to event.ItemID when call_id is unavailable
 		fallbackID := outputItemEvent.Item.ID
 		if fallbackID == "" {
@@ -901,11 +938,11 @@ func (s *aiService) handleOutputItemAdded(event responses.ResponseStreamEventUni
 				"error", "missing_identifiers")
 			return fmt.Errorf("call_id extraction failed: both call_id and item_id are empty in function call item")
 		}
-		
+
 		callID = fallbackID
 		fallbackUsed = true
 		fallbackReason = "missing_call_id"
-		
+
 		// Log fallback strategy usage with reasons
 		slog.Info("Using fallback identification strategy",
 			"fallback_call_id", callID,
@@ -951,18 +988,18 @@ func (s *aiService) handleOutputItemAdded(event responses.ResponseStreamEventUni
 	} else {
 		// Create new tool call entry with the extracted call_id
 		toolCall := &responses.ResponseFunctionToolCall{
-			ID:        outputItemEvent.Item.ID,        // Keep item ID for compatibility
-			CallID:    callID,                         // Use extracted call_id as primary key
-			Name:      outputItemEvent.Item.Name,      // Function name from the event
-			Arguments: "",                             // Arguments will be accumulated from delta events
+			ID:        outputItemEvent.Item.ID,   // Keep item ID for compatibility
+			CallID:    callID,                    // Use extracted call_id as primary key
+			Name:      outputItemEvent.Item.Name, // Function name from the event
+			Arguments: "",                        // Arguments will be accumulated from delta events
 		}
-		
+
 		// Add to tool call state using call_id as the primary key
 		state.toolCalls[callID] = toolCall
-		
+
 		// Store mapping from item_id to call_id for delta event processing
 		state.itemToCallID[outputItemEvent.Item.ID] = callID
-		
+
 		slog.Info("Created new tool call from output item",
 			"call_id", callID,
 			"item_id", outputItemEvent.Item.ID,
@@ -1293,8 +1330,8 @@ func (s *aiService) executeToolsFromResponsesAPI(ctx context.Context, msgCtx *Me
 	for i, toolCall := range toolCalls {
 		allCallIDs[i] = toolCall.CallID
 	}
-	
-	slog.Info("Executing tool calls from Responses API with call_id traceability", 
+
+	slog.Info("Executing tool calls from Responses API with call_id traceability",
 		"tool_call_count", len(toolCalls),
 		"all_call_ids", allCallIDs,
 		"implementation", "responses_api")
@@ -1454,11 +1491,11 @@ func (s *aiService) executeToolsFromResponsesAPI(ctx context.Context, msgCtx *Me
 			successfulExecutions++
 		}
 	}
-	
+
 	slog.Info("All tool executions completed with comprehensive call_id summary",
 		"total_results", len(results),
 		"successful_executions", successfulExecutions,
-		"failed_executions", len(results) - successfulExecutions,
+		"failed_executions", len(results)-successfulExecutions,
 		"completed_call_ids", completedCallIDs,
 		"implementation", "responses_api")
 
@@ -1467,69 +1504,59 @@ func (s *aiService) executeToolsFromResponsesAPI(ctx context.Context, msgCtx *Me
 
 // accumulateAnalysisContext builds enhanced context with accumulated insights
 func (s *aiService) accumulateAnalysisContext(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall, toolResults []ToolResult, responseContent string) *IterativeProcessor {
-	// Add tool results to processor
+	// Add tool results to processor for tracking
 	processor.AddToolResults(toolResults)
 
-	// Add assistant message with response content to conversation
-	if responseContent != "" {
-		processor.Messages = append(processor.Messages, responses.ResponseInputItemParamOfMessage(
-			responseContent,
-			responses.EasyInputMessageRoleAssistant,
-		))
-	}
-
+	// With Responses API and LastResponseID, we don't need to accumulate messages
+	// The conversation context is maintained via the response ID
+	// Only add tool results for the next iteration
+	
 	// Fix tool result IDs to match the current tool calls
-	// This is the key fix: ensure tool results use the exact IDs from the current conversation
 	fixedToolResults := toolResults
 
-	slog.Info("Fixed tool call IDs for function call outputs",
+	slog.Info("Processing tool call results for next iteration",
 		"expected_tool_calls", len(toolCalls),
 		"original_tool_results", len(toolResults),
-		"fixed_tool_results", len(fixedToolResults))
+		"fixed_tool_results", len(fixedToolResults),
+		"using_response_id", processor.Context.LastResponseID != "")
 
-	// Add tool results as function call outputs with fixed IDs
-	successfullyAdded := 0
+	// Prepare tool results for the next API call
+	// These will be included in the next request as tool call outputs
+	successfullyProcessed := 0
 	for _, result := range fixedToolResults {
-		// Validate tool call ID before adding to conversation
+		// Validate tool call ID
 		if result.ToolCallID == "" {
-			slog.Warn("Skipping tool result with empty call_id - conversation traceability issue",
+			slog.Warn("Skipping tool result with empty call_id",
 				"content_length", len(result.Content),
 				"has_error", result.Error != "",
-				"result_content_preview", s.getContentPreview(result.Content),
-				"error_type", "missing_call_id_conversation")
+				"result_content_preview", s.getContentPreview(result.Content))
 			continue
 		}
 
-		slog.Info("Adding tool call result to conversation with call_id traceability",
+		slog.Info("Processed tool call result for next iteration",
 			"call_id", result.ToolCallID,
-			"tool_call_id", result.ToolCallID, // Include both for consistency
 			"content_length", len(result.Content),
 			"has_error", result.Error != "",
-			"result_index", successfullyAdded)
+			"result_index", successfullyProcessed)
 
-		// Create function call output with proper error handling
-		functionCallOutput := responses.ResponseInputItemParamOfFunctionCallOutput(
-			result.ToolCallID,
-			result.Content,
-		)
-
-		processor.Messages = append(processor.Messages, functionCallOutput)
-		successfullyAdded++
+		// With Responses API, tool results will be included in the next request
+		// rather than accumulated in processor.Messages
+		successfullyProcessed++
 	}
 
-	// Enhanced completion summary with call_id traceability
-	addedCallIDs := make([]string, 0, successfullyAdded)
+	// Enhanced completion summary
+	processedCallIDs := make([]string, 0, successfullyProcessed)
 	for _, result := range fixedToolResults {
 		if result.ToolCallID != "" {
-			addedCallIDs = append(addedCallIDs, result.ToolCallID)
+			processedCallIDs = append(processedCallIDs, result.ToolCallID)
 		}
 	}
-	
-	slog.Info("Successfully added function call outputs with call_id summary",
-		"added_count", successfullyAdded,
+
+	slog.Info("Successfully processed tool call results for next iteration",
+		"processed_count", successfullyProcessed,
 		"total_results", len(fixedToolResults),
-		"added_call_ids", addedCallIDs,
-		"skipped_results", len(fixedToolResults) - successfullyAdded)
+		"processed_call_ids", processedCallIDs,
+		"skipped_results", len(fixedToolResults)-successfullyProcessed)
 
 	return processor
 }
@@ -1631,8 +1658,6 @@ func getMapKeysString(m map[string]string) []string {
 	return keys
 }
 
-
-
 // accumulateAnalysisContextSafely builds enhanced context with accumulated insights while avoiding tool call ID mismatches
 func (s *aiService) accumulateAnalysisContextSafely(processor *IterativeProcessor, toolCalls []responses.ResponseFunctionToolCall, toolResults []ToolResult, responseContent string) *IterativeProcessor {
 	// Add tool results to processor
@@ -1685,7 +1710,7 @@ func (s *aiService) accumulateAnalysisContextSafely(processor *IterativeProcesso
 			processedCallIDs = append(processedCallIDs, result.ToolCallID)
 		}
 	}
-	
+
 	slog.Info("Successfully accumulated analysis context safely with call_id summary",
 		"total_messages", len(processor.Messages),
 		"tool_results", len(toolResults),
@@ -1707,13 +1732,20 @@ LOGBOOK MANAGEMENT:
 - Whenever you think the logbook needs update, you should do it with the provided tool. It could be after analyzing an activity, providing suggestion, plan, athlete sharing their constraint, preference etc. All significant or useful info about the athlete should be in the logbook.
 - The logbook is stored using the athlete's Strava ID, ensuring their data persists across login sessions
 - Include the athlete's Strava ID and current timestamp in the logbook
+- Keep the logbook as small as possible, only key insights and any current training plan should be part of it. Detailed analysis of any individual workout should not be part of it.
 
 COACHING APPROACH:
 - Use the logbook context to provide personalized coaching based on the athlete's complete history
 - Structure the logbook content however you think will be most effective for coaching
+- When athlete asks for an analysis for any of their workout ask them what they want next from you. Give them a workout or training plan only if they ask for it.
+- Try not to simply repeat the data you get from the tools, rather try to present insights.
 
 RESPONSE FORMAT:
-- Your response will be rendered as markdown, so feel free to format your response using markdown when appropriate.
+- Your response will be rendered as markdown, so use headings, bold, italics, tables etc when appropriate.
+- Mermaid and vega lite is also supported for graphics rendering. Provide simple graphics or diagrams when appropriate.
+
+CRITICAL INSTRUCTION
+- Whenever you provide analysis or information of a specific activity from strava, include a link back to the original activity in strava in markdown format.
 
 Available tools:
 - get-athlete-profile: Get complete Strava athlete profile

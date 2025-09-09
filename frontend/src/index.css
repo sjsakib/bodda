@@ -8,106 +8,106 @@
   .diagram-code-block {
     @apply relative;
   }
-  
+
   .mermaid-code-block {
     @apply bg-blue-50 border-blue-200;
   }
-  
+
   .vega-lite-code-block {
     @apply bg-green-50 border-green-200;
   }
-  
+
   /* Diagram fallback styles */
   .diagram-fallback {
     @apply relative;
   }
-  
+
   .mermaid-fallback .bg-yellow-50 {
     @apply border-l-4 border-l-blue-400;
   }
-  
+
   .vega-lite-fallback .bg-yellow-50 {
     @apply border-l-4 border-l-green-400;
   }
-  
+
   /* Enhanced markdown content with diagrams */
   .markdown-content.has-diagrams {
     @apply space-y-4;
   }
-  
+
   /* Diagram loading states in chat */
   .markdown-content .diagram-loading {
     @apply bg-gray-50 border border-gray-200 rounded-lg p-4;
   }
-  
+
   /* Diagram error states in chat */
   .markdown-content .diagram-error {
     @apply bg-red-50 border border-red-200 rounded-lg p-4;
   }
-  
+
   /* Responsive diagram containers in chat messages */
   .markdown-content .diagram-code-block {
     @apply max-w-full overflow-hidden;
   }
-  
+
   /* Mobile-specific diagram styles */
   @media (max-width: 640px) {
     .markdown-content.has-diagrams {
       @apply space-y-3;
     }
-    
+
     .diagram-code-block {
       @apply mx-0;
     }
   }
-  
+
   /* Diagram zoom controls styling */
   .diagram-zoom-controls {
     @apply absolute top-2 right-2 z-10 flex space-x-1 bg-white/90 backdrop-blur-sm rounded-lg p-1 shadow-sm border border-gray-200;
   }
-  
+
   .diagram-zoom-button {
     @apply w-8 h-8 flex items-center justify-center rounded text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors;
   }
-  
+
   /* High contrast mode support for diagrams */
   @media (prefers-contrast: high) {
     .diagram-code-block {
       @apply border-2 border-black;
     }
-    
+
     .diagram-zoom-controls {
       @apply bg-white border-2 border-black;
     }
-    
+
     .diagram-zoom-button {
       @apply text-black border border-black;
     }
   }
-  
+
   /* Dark mode support for diagram containers */
   @media (prefers-color-scheme: dark) {
     .diagram-code-block {
       @apply bg-gray-800 border-gray-600;
     }
-    
+
     .mermaid-code-block {
       @apply bg-blue-900/20 border-blue-600;
     }
-    
+
     .vega-lite-code-block {
       @apply bg-green-900/20 border-green-600;
     }
-    
+
     .diagram-zoom-controls {
       @apply bg-gray-800/90 border-gray-600;
     }
-    
+
     .diagram-zoom-button {
       @apply text-gray-300 hover:text-white hover:bg-gray-700;
     }
   }
-  
+
   /* Smooth transitions for diagram state changes */
   .diagram-code-block,
   .diagram-fallback,
@@ -115,59 +115,406 @@
   .diagram-error {
     @apply transition-all duration-200 ease-in-out;
   }
-  
+
   /* Focus styles for accessibility */
   .diagram-code-block:focus-within {
     @apply ring-2 ring-blue-500 ring-offset-2;
   }
-  
+
   /* Print styles for diagrams */
   @media print {
     .diagram-zoom-controls {
       @apply hidden;
     }
-    
+
     .diagram-code-block {
       @apply break-inside-avoid;
     }
   }
-  
+
   /* Chat message integration styles */
   .chat-message-container {
     @apply relative overflow-visible;
   }
-  
+
   .chat-message-content {
     @apply w-full;
   }
-  
+
   /* Ensure diagrams don't break chat message layout */
   .chat-message-container .diagram-code-block {
     @apply w-full max-w-full;
   }
-  
+
   /* Adjust diagram margins in chat messages */
   .chat-message-content .diagram-code-block:first-child {
     @apply mt-0;
   }
-  
+
   .chat-message-content .diagram-code-block:last-child {
     @apply mb-0;
   }
-  
+
   /* Streaming message diagram handling */
   .chat-message-streaming .diagram-code-block {
     @apply opacity-75;
   }
-  
+
   /* Mobile chat message diagram adjustments */
   @media (max-width: 640px) {
     .chat-message-container .diagram-code-block {
       @apply mx-0 rounded-md;
     }
-    
+
     .chat-message-content .diagram-zoom-controls {
       @apply scale-90;
     }
+  }
+
+  /* Legal page enhanced styling with improved contrast */
+  .legal-content {
+    @apply text-gray-900 leading-relaxed;
+    line-height: 1.7;
+  }
+
+  /* Enhanced typography for legal pages */
+  .legal-content h1 {
+    @apply text-4xl font-bold text-gray-900 mb-8 leading-tight;
+  }
+
+  .legal-content h2 {
+    @apply text-2xl font-bold text-gray-900 mb-6 mt-12 pb-3 border-b-2 border-gray-300 leading-tight;
+    scroll-margin-top: 2rem;
+  }
+
+  .legal-content h3 {
+    @apply text-xl font-semibold text-gray-900 mb-4 mt-8 leading-tight;
+    scroll-margin-top: 2rem;
+  }
+
+  .legal-content h4 {
+    @apply text-lg font-semibold text-gray-900 mb-3 mt-6 leading-tight;
+    scroll-margin-top: 2rem;
+  }
+
+  /* Enhanced paragraph styling with better contrast */
+  .legal-content p {
+    @apply mb-6 text-gray-800 leading-relaxed text-base;
+    line-height: 1.7;
+  }
+
+  /* Enhanced list styling with better contrast */
+  .legal-content ul {
+    @apply mb-6 space-y-3;
+  }
+
+  .legal-content li {
+    @apply text-gray-800 leading-relaxed pl-2;
+    line-height: 1.6;
+  }
+
+  .legal-content ul li {
+    @apply relative;
+  }
+
+  .legal-content ul li::marker {
+    @apply text-blue-600;
+  }
+
+  /* Nested list styling */
+  .legal-content ul ul {
+    @apply mt-3 mb-3 ml-4 space-y-2;
+  }
+
+  .legal-content ul ul li {
+    @apply text-sm text-gray-800;
+  }
+
+  /* Enhanced strong text */
+  .legal-content strong {
+    @apply font-semibold text-gray-900;
+  }
+
+  /* Enhanced link styling with better contrast */
+  .legal-content a {
+    @apply text-blue-700 hover:text-blue-900 underline decoration-blue-400 hover:decoration-blue-600 transition-colors duration-200 font-medium;
+  }
+
+  /* Enhanced callout boxes */
+  .legal-content .bg-yellow-50 {
+    @apply border border-yellow-200 rounded-xl p-6 mb-8 shadow-sm;
+    background: linear-gradient(135deg, rgb(254 249 195) 0%, rgb(254 240 138) 100%);
+  }
+
+  .legal-content .bg-red-50 {
+    @apply border border-red-200 rounded-xl p-6 mb-8 shadow-sm;
+    background: linear-gradient(135deg, rgb(254 242 242) 0%, rgb(254 202 202) 100%);
+  }
+
+  .legal-content .bg-blue-50 {
+    @apply border border-blue-200 rounded-xl p-6 mb-8 shadow-sm;
+    background: linear-gradient(135deg, rgb(239 246 255) 0%, rgb(219 234 254) 100%);
+  }
+
+  .legal-content .bg-green-50 {
+    @apply border border-green-200 rounded-xl p-6 mb-8 shadow-sm;
+    background: linear-gradient(135deg, rgb(240 253 244) 0%, rgb(220 252 231) 100%);
+  }
+
+  .legal-content .bg-orange-50 {
+    @apply border border-orange-200 rounded-xl p-6 mb-8 shadow-sm;
+    background: linear-gradient(135deg, rgb(255 247 237) 0%, rgb(254 215 170) 100%);
+  }
+
+  .legal-content .bg-gray-50 {
+    @apply border border-gray-200 rounded-xl p-6 mb-8 shadow-sm;
+    background: linear-gradient(135deg, rgb(249 250 251) 0%, rgb(243 244 246) 100%);
+  }
+
+  /* Enhanced callout content styling with better contrast */
+  .legal-content .bg-yellow-50 p,
+  .legal-content .bg-red-50 p,
+  .legal-content .bg-blue-50 p,
+  .legal-content .bg-green-50 p,
+  .legal-content .bg-orange-50 p,
+  .legal-content .bg-gray-50 p {
+    @apply mb-3 last:mb-0 text-gray-900;
+  }
+
+  .legal-content .bg-yellow-50 ul,
+  .legal-content .bg-red-50 ul,
+  .legal-content .bg-blue-50 ul,
+  .legal-content .bg-green-50 ul,
+  .legal-content .bg-orange-50 ul,
+  .legal-content .bg-gray-50 ul {
+    @apply mb-3 last:mb-0 space-y-2;
+  }
+
+  .legal-content .bg-yellow-50 li,
+  .legal-content .bg-red-50 li,
+  .legal-content .bg-blue-50 li,
+  .legal-content .bg-green-50 li,
+  .legal-content .bg-orange-50 li,
+  .legal-content .bg-gray-50 li {
+    @apply text-gray-900;
+  }
+
+  /* Enhanced callout icons */
+  .legal-content .bg-yellow-50 svg,
+  .legal-content .bg-red-50 svg,
+  .legal-content .bg-blue-50 svg,
+  .legal-content .bg-green-50 svg,
+  .legal-content .bg-orange-50 svg {
+    @apply drop-shadow-sm;
+  }
+
+  /* Enhanced section spacing */
+  .legal-content section {
+    @apply mb-12;
+  }
+
+  .legal-content section:last-child {
+    @apply mb-0;
+  }
+
+  /* Table of contents styling */
+  .legal-content .toc {
+    @apply bg-gray-100 border border-gray-200 rounded-xl p-6 mb-8;
+  }
+
+  .legal-content .toc h3 {
+    @apply text-lg font-semibold text-gray-900 mb-4 mt-0;
+  }
+
+  .legal-content .toc ul {
+    @apply space-y-2 mb-0;
+  }
+
+  .legal-content .toc li {
+    @apply text-sm;
+  }
+
+  /* Print styles for legal pages */
+  @media print {
+    .legal-content {
+      @apply text-black;
+    }
+
+    .legal-content h1,
+    .legal-content h2,
+    .legal-content h3,
+    .legal-content h4 {
+      @apply text-black;
+    }
+
+    .legal-content .bg-yellow-50,
+    .legal-content .bg-red-50,
+    .legal-content .bg-blue-50,
+    .legal-content .bg-green-50,
+    .legal-content .bg-orange-50,
+    .legal-content .bg-gray-50 {
+      border: 2px solid rgb(156 163 175);
+      background-color: white;
+    }
+
+    .legal-content a {
+      @apply text-black no-underline;
+    }
+
+    .legal-content a::after {
+      content: ' (' attr(href) ')';
+      @apply text-xs text-gray-600;
+    }
+  }
+
+  /* Mobile responsive adjustments for legal pages */
+  @media (max-width: 640px) {
+    .legal-content h1 {
+      @apply text-3xl mb-6;
+    }
+
+    .legal-content h2 {
+      @apply text-xl mb-4 mt-8 pb-2;
+    }
+
+    .legal-content h3 {
+      @apply text-lg mb-3 mt-6;
+    }
+
+    .legal-content h4 {
+      @apply text-base mb-2 mt-4;
+    }
+
+    .legal-content p {
+      @apply mb-4 text-sm text-gray-900;
+      line-height: 1.6;
+    }
+
+    .legal-content ul {
+      @apply mb-4 space-y-2;
+    }
+
+    .legal-content li {
+      @apply text-sm pl-1 text-gray-900;
+      line-height: 1.5;
+    }
+
+    .legal-content .bg-yellow-50,
+    .legal-content .bg-red-50,
+    .legal-content .bg-blue-50,
+    .legal-content .bg-green-50,
+    .legal-content .bg-orange-50,
+    .legal-content .bg-gray-50 {
+      @apply p-4 mb-6 rounded-lg;
+    }
+
+    .legal-content section {
+      @apply mb-8;
+    }
+
+    /* Improve readability on mobile */
+    .legal-content {
+      font-size: 14px;
+    }
+  }
+
+  /* Dark mode support for legal pages */
+  /* @media (prefers-color-scheme: dark) {
+    .legal-content {
+      @apply text-gray-200;
+    }
+
+    .legal-content h1,
+    .legal-content h2,
+    .legal-content h3,
+    .legal-content h4 {
+      @apply text-white;
+    }
+
+    .legal-content p,
+    .legal-content li {
+      @apply text-gray-300;
+    }
+
+    .legal-content strong {
+      @apply text-white;
+    }
+
+    .legal-content a {
+      @apply text-blue-400 hover:text-blue-300 decoration-blue-500 hover:decoration-blue-400;
+    }
+
+    .legal-content .bg-yellow-50 {
+      background-color: rgb(254 240 138 / 0.2);
+      border-color: rgb(202 138 4);
+    }
+
+    .legal-content .bg-red-50 {
+      background-color: rgb(254 202 202 / 0.2);
+      border-color: rgb(220 38 38);
+    }
+
+    .legal-content .bg-blue-50 {
+      background-color: rgb(147 197 253 / 0.2);
+      border-color: rgb(37 99 235);
+    }
+
+    .legal-content .bg-green-50 {
+      background-color: rgb(134 239 172 / 0.2);
+      border-color: rgb(22 163 74);
+    }
+
+    .legal-content .bg-orange-50 {
+      background-color: rgb(254 215 170 / 0.2);
+      border-color: rgb(234 88 12);
+    }
+
+    .legal-content .bg-gray-50 {
+      background-color: rgb(31 41 55);
+      border-color: rgb(75 85 99);
+    }
+  } */
+
+  /* High contrast mode support for legal pages */
+  @media (prefers-contrast: high) {
+    .legal-content {
+      @apply text-black;
+    }
+
+    .legal-content h1,
+    .legal-content h2,
+    .legal-content h3,
+    .legal-content h4 {
+      @apply text-black;
+    }
+
+    .legal-content a {
+      @apply text-blue-800 underline decoration-2;
+    }
+
+    .legal-content .bg-yellow-50,
+    .legal-content .bg-red-50,
+    .legal-content .bg-blue-50,
+    .legal-content .bg-green-50,
+    .legal-content .bg-orange-50,
+    .legal-content .bg-gray-50 {
+      border: 2px solid black;
+    }
+  }
+
+  /* Focus styles for accessibility */
+  .legal-content a:focus {
+    @apply outline-2 outline-blue-500 outline-offset-2;
+  }
+
+  .legal-content h2:target,
+  .legal-content h3:target,
+  .legal-content h4:target {
+    @apply bg-yellow-100 -mx-4 px-4 py-2 rounded-lg;
+  }
+
+  /* Smooth scrolling for anchor links */
+  html {
+    scroll-behavior: smooth;
   }
 }

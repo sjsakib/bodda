@@ -12,6 +12,13 @@ import (
 	"bodda/internal/models"
 )
 
+// MockSessionRepositoryForErrorHandling for testing
+type MockSessionRepositoryForErrorHandling struct{}
+
+func (m *MockSessionRepositoryForErrorHandling) UpdateLastResponseID(ctx context.Context, sessionID string, responseID string) error {
+	return nil // Simple mock that always succeeds
+}
+
 func TestStravaServiceErrorHandling(t *testing.T) {
 	cfg := &config.Config{
 		StravaClientID:     "test_client_id",
@@ -138,7 +145,8 @@ func TestInputValidation(t *testing.T) {
 			mockStravaService := &mockStravaServiceBasic{}
 			mockLogbookService := &mockLogbookServiceBasic{}
 			mockToolRegistry := NewToolRegistry()
-			aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockToolRegistry).(*aiService)
+			mockSessionRepo := &MockSessionRepositoryForErrorHandling{}
+			aiService := NewAIService(cfg, mockStravaService, mockLogbookService, mockSessionRepo, mockToolRegistry).(*aiService)
 
 			err := aiService.validateMessageContext(msgCtx)
 

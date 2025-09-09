@@ -4,7 +4,10 @@ NOW
   - Brand guideline
   - Link back to strava
   -
-  - Privacy policy?
+  - Privacy policy? ✅ CREATED - needs legal review
+- Terms of Service ✅ CREATED - needs legal review  
+- Data Usage Policy - needs creation
+- Strava API compliance implementation ⚠️ IN PROGRESS
 - deploy
 
 BEFORE SUBMISSION
@@ -31,7 +34,7 @@ LOWER
 - Automatically start building logbook on login/connect
 - Bodda can be more clear about what tool it is using without bringing in jargons
 - Allow deleting session
-- Add T&C, privacy policy
+- Add T&C, privacy policy ✅ CREATED - needs integration into app
 - Bodda should reflect the tone of the athletes conversation like serious/casual/fun
 
 IDEAS

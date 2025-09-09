@@ -52,6 +52,92 @@ func TestSessionModel(t *testing.T) {
 	assert.Contains(t, jsonStr, "Test Session")
 }
 
+func TestSessionModelWithLastResponseID(t *testing.T) {
+	responseID := "response-123"
+	session := &Session{
+		ID:             "session-id",
+		UserID:         "user-id",
+		Title:          "Test Session",
+		LastResponseID: &responseID,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	// Test JSON marshaling with LastResponseID
+	jsonData, err := json.Marshal(session)
+	assert.NoError(t, err)
+	
+	jsonStr := string(jsonData)
+	assert.Contains(t, jsonStr, "session-id")
+	assert.Contains(t, jsonStr, "user-id")
+	assert.Contains(t, jsonStr, "Test Session")
+	assert.Contains(t, jsonStr, "response-123")
+	assert.Contains(t, jsonStr, "last_response_id")
+}
+
+func TestSessionModelWithNullLastResponseID(t *testing.T) {
+	session := &Session{
+		ID:             "session-id",
+		UserID:         "user-id",
+		Title:          "Test Session",
+		LastResponseID: nil, // Explicitly set to nil
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	// Test JSON marshaling with nil LastResponseID
+	jsonData, err := json.Marshal(session)
+	assert.NoError(t, err)
+	
+	jsonStr := string(jsonData)
+	assert.Contains(t, jsonStr, "session-id")
+	assert.Contains(t, jsonStr, "user-id")
+	assert.Contains(t, jsonStr, "Test Session")
+	
+	// With omitempty tag, nil LastResponseID should not appear in JSON
+	assert.NotContains(t, jsonStr, "last_response_id")
+}
+
+func TestSessionModelJSONUnmarshaling(t *testing.T) {
+	// Test unmarshaling JSON with LastResponseID
+	jsonWithResponseID := `{
+		"id": "session-id",
+		"user_id": "user-id",
+		"title": "Test Session",
+		"last_response_id": "response-456",
+		"created_at": "2023-01-01T00:00:00Z",
+		"updated_at": "2023-01-01T00:00:00Z"
+	}`
+	
+	var session Session
+	err := json.Unmarshal([]byte(jsonWithResponseID), &session)
+	assert.NoError(t, err)
+	
+	assert.Equal(t, "session-id", session.ID)
+	assert.Equal(t, "user-id", session.UserID)
+	assert.Equal(t, "Test Session", session.Title)
+	assert.NotNil(t, session.LastResponseID)
+	assert.Equal(t, "response-456", *session.LastResponseID)
+	
+	// Test unmarshaling JSON without LastResponseID
+	jsonWithoutResponseID := `{
+		"id": "session-id-2",
+		"user_id": "user-id-2",
+		"title": "Test Session 2",
+		"created_at": "2023-01-01T00:00:00Z",
+		"updated_at": "2023-01-01T00:00:00Z"
+	}`
+	
+	var session2 Session
+	err = json.Unmarshal([]byte(jsonWithoutResponseID), &session2)
+	assert.NoError(t, err)
+	
+	assert.Equal(t, "session-id-2", session2.ID)
+	assert.Equal(t, "user-id-2", session2.UserID)
+	assert.Equal(t, "Test Session 2", session2.Title)
+	assert.Nil(t, session2.LastResponseID)
+}
+
 func TestMessageModel(t *testing.T) {
 	message := &Message{
 		ID:        "message-id",
