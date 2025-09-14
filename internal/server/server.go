@@ -112,6 +112,7 @@ func (s *Server) setupRoutes() {
 	{
 		api.GET("/sessions", s.getSessions)
 		api.POST("/sessions", s.createSession)
+		api.DELETE("/sessions/:id", s.deleteSession)
 		api.GET("/sessions/:id/messages", s.getMessages)
 		api.POST("/sessions/:id/messages", s.sendMessage)
 		api.GET("/sessions/:id/stream", s.streamResponse)
@@ -367,6 +368,75 @@ func (s *Server) createSession(c *gin.Context) {
 	}
 
 	c.JSON(201, gin.H{"session": session})
+}
+
+// deleteSession deletes a chat session for the authenticated user
+func (s *Server) deleteSession(c *gin.Context) {
+	sessionID := c.Param("id")
+	if sessionID == "" {
+		c.JSON(400, gin.H{
+			"error": "Session ID is required",
+			"code":  "MISSING_SESSION_ID",
+		})
+		return
+	}
+
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(401, gin.H{
+			"error": "Authentication required",
+			"code":  "AUTH_REQUIRED",
+		})
+		return
+	}
+
+	userModel := user.(*models.User)
+
+	// Verify session belongs to user before deletion
+	session, err := s.chatService.GetSession(sessionID)
+	if err != nil {
+		log.Printf("Error getting session %s for deletion: %v", sessionID, err)
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(404, gin.H{
+				"error": "Session not found",
+				"code":  "SESSION_NOT_FOUND",
+			})
+			return
+		}
+		c.JSON(500, gin.H{
+			"error": "Failed to verify session",
+			"code":  "SESSION_VERIFICATION_ERROR",
+		})
+		return
+	}
+
+	if session.UserID != userModel.ID {
+		c.JSON(403, gin.H{
+			"error": "Access denied",
+			"code":  "ACCESS_DENIED",
+		})
+		return
+	}
+
+	// Delete the session
+	err = s.chatService.DeleteSession(sessionID)
+	if err != nil {
+		log.Printf("Error deleting session %s: %v", sessionID, err)
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(404, gin.H{
+				"error": "Session not found",
+				"code":  "SESSION_NOT_FOUND",
+			})
+			return
+		}
+		c.JSON(500, gin.H{
+			"error": "Failed to delete session",
+			"code":  "SESSION_DELETION_ERROR",
+		})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Session deleted successfully"})
 }
 
 // getMessages retrieves all messages for a specific session

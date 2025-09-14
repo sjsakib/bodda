@@ -65,6 +65,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }
@@ -118,6 +119,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }
@@ -159,6 +161,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }
@@ -208,6 +211,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }
@@ -264,6 +268,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }
@@ -308,6 +313,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }
@@ -353,6 +359,7 @@ describe('SessionSidebar Timestamp Integration', () => {
       onCreateSession: vi.fn(),
       isCreatingSession: false,
       onSelectSession: vi.fn(),
+      onDeleteSession: vi.fn(),
       isLoading: false,
       error: null
     }

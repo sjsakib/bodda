@@ -9,6 +9,7 @@ interface MobileSessionMenuProps {
   onCreateSession: () => void
   isCreatingSession: boolean
   onSelectSession: (sessionId: string) => void
+  onDeleteSession: (sessionId: string) => void
   isOpen: boolean
   onClose: () => void
   isLoading?: boolean
@@ -22,6 +23,7 @@ export default function MobileSessionMenu({
   onCreateSession,
   isCreatingSession,
   onSelectSession,
+  onDeleteSession,
   isOpen,
   onClose,
   isLoading = false,
@@ -143,6 +145,13 @@ export default function MobileSessionMenu({
     onClose()
   }
 
+  // Handle session deletion
+  const handleSessionDelete = (sessionId: string, sessionTitle: string) => {
+    if (window.confirm(`Are you sure you want to delete "${sessionTitle}"? This action cannot be undone.`)) {
+      onDeleteSession(sessionId)
+    }
+  }
+
   if (!isOpen) return null
 
   return (
@@ -250,26 +259,45 @@ export default function MobileSessionMenu({
               ) : (
                 <div className="space-y-2" role="list" aria-label="Chat sessions">
                   {sessions.map((session, index) => (
-                    <button
-                      key={session.id}
-                      ref={index === 0 ? firstSessionButtonRef : undefined}
-                      onClick={() => handleSessionSelect(session.id)}
-                      className={`w-full text-left p-4 rounded-lg transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                        currentSessionId === session.id
-                          ? 'bg-blue-100 text-blue-900'
-                          : 'hover:bg-gray-100'
-                      }`}
-                      role="listitem"
-                      aria-label={`Select session: ${session.title}, created on ${new Date(session.created_at).toLocaleDateString()}`}
-                      aria-current={currentSessionId === session.id ? 'page' : undefined}
-                    >
-                      <div className="font-medium text-base truncate">
-                        {session.title}
-                      </div>
-                      <div className="text-sm text-gray-500 mt-1" aria-hidden="true">
-                        {new Date(session.created_at).toLocaleDateString()}
-                      </div>
-                    </button>
+                    <div key={session.id} className="relative group" role="listitem">
+                      <button
+                        ref={index === 0 ? firstSessionButtonRef : undefined}
+                        onClick={() => handleSessionSelect(session.id)}
+                        className={`w-full text-left p-4 rounded-lg transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          currentSessionId === session.id
+                            ? 'bg-blue-100 text-blue-900'
+                            : 'hover:bg-gray-100'
+                        }`}
+                        aria-label={`Select session: ${session.title}, created on ${new Date(session.created_at).toLocaleDateString()}`}
+                        aria-current={currentSessionId === session.id ? 'page' : undefined}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-base truncate">
+                              {session.title}
+                            </div>
+                            <div className="text-sm text-gray-500 mt-1" aria-hidden="true">
+                              {new Date(session.created_at).toLocaleDateString()}
+                            </div>
+                          </div>
+                          
+                          {/* Delete button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleSessionDelete(session.id, session.title)
+                            }}
+                            className="ml-3 p-2 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors flex-shrink-0"
+                            aria-label={`Delete session: ${session.title}`}
+                            title="Delete session"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}

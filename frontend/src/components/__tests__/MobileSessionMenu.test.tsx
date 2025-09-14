@@ -47,6 +47,7 @@ describe('MobileSessionMenu', () => {
     onCreateSession: vi.fn(),
     isCreatingSession: false,
     onSelectSession: vi.fn(),
+    onDeleteSession: vi.fn(),
     isOpen: true,
     onClose: vi.fn(),
     isLoading: false,

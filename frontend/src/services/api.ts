@@ -218,6 +218,13 @@ class ApiClient {
     return data.session
   }
 
+  async deleteSession(sessionId: string): Promise<void> {
+    const response = await this.fetchWithRetry(`/api/sessions/${sessionId}`, {
+      method: 'DELETE',
+    })
+    await this.handleResponse(response)
+  }
+
   async getMessages(sessionId: string, limit?: number, offset?: number): Promise<Message[]> {
     const params = new URLSearchParams()
     if (limit !== undefined) params.append('limit', limit.toString())

@@ -135,6 +135,8 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -168,6 +170,8 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -238,6 +242,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -333,6 +338,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -366,6 +372,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -417,6 +424,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -454,6 +462,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -493,6 +502,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -621,6 +631,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: true,
         error: null
       }
@@ -643,6 +654,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: new Error('Failed to load sessions'),
         onRetryLoad: mockOnRetryLoad
@@ -840,6 +852,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }
@@ -871,6 +884,7 @@ describe('Session Timestamp Integration Tests', () => {
         onCreateSession: vi.fn(),
         isCreatingSession: false,
         onSelectSession: vi.fn(),
+        onDeleteSession: vi.fn(),
         isLoading: false,
         error: null
       }

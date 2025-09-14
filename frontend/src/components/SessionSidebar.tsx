@@ -10,6 +10,7 @@ interface SessionSidebarProps {
   onCreateSession: () => void;
   isCreatingSession: boolean;
   onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
   isLoading?: boolean;
   error?: unknown;
   onRetryLoad?: () => void;
@@ -19,6 +20,7 @@ interface SessionButtonProps {
   session: Session;
   isSelected: boolean;
   onSelect: () => void;
+  onDelete: () => void;
   formattedTimestamp: string;
   fullTimestamp: string;
 }
@@ -27,11 +29,13 @@ function SessionButton({
   session,
   isSelected,
   onSelect,
+  onDelete,
   formattedTimestamp,
   fullTimestamp,
 }: SessionButtonProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [isTextTruncated, setIsTextTruncated] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   // Check if text is truncated by comparing scroll width with client width
   const handleTextRef = (element: HTMLDivElement | null) => {
@@ -40,12 +44,27 @@ function SessionButton({
     }
   };
 
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent session selection
+    if (window.confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+      onDelete();
+    }
+  };
+
   return (
-    <div className='relative'>
+    <div 
+      className='relative group'
+      onMouseEnter={() => {
+        setShowTooltip(true);
+        setIsHovered(true);
+      }}
+      onMouseLeave={() => {
+        setShowTooltip(false);
+        setIsHovered(false);
+      }}
+    >
       <button
         onClick={onSelect}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
         onFocus={() => setShowTooltip(true)}
         onBlur={() => setShowTooltip(false)}
         className={`w-full text-left p-3 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
@@ -60,12 +79,28 @@ function SessionButton({
         role='option'
         aria-selected={isSelected}
       >
-        <div
-          ref={handleTextRef}
-          className='font-medium text-sm truncate min-w-0'
-          title={isTextTruncated ? formattedTimestamp : undefined}
-        >
-          {formattedTimestamp}
+        <div className='flex items-center justify-between'>
+          <div
+            ref={handleTextRef}
+            className='font-medium text-sm truncate min-w-0 flex-1'
+            title={isTextTruncated ? formattedTimestamp : undefined}
+          >
+            {formattedTimestamp}
+          </div>
+          
+          {/* Delete button - shows on hover */}
+          {isHovered && (
+            <button
+              onClick={handleDeleteClick}
+              className='ml-2 p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors flex-shrink-0'
+              aria-label={`Delete session from ${fullTimestamp}`}
+              title='Delete session'
+            >
+              <svg className='w-4 h-4' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' />
+              </svg>
+            </button>
+          )}
         </div>
         <div id={`session-${session.id}-description`} className='sr-only'>
           Session created on {fullTimestamp}
@@ -93,6 +128,7 @@ export default function SessionSidebar({
   onCreateSession,
   isCreatingSession,
   onSelectSession,
+  onDeleteSession,
   isLoading = false,
   error = null,
   onRetryLoad,
@@ -175,6 +211,7 @@ export default function SessionSidebar({
                     session={session}
                     isSelected={currentSessionId === session.id}
                     onSelect={() => onSelectSession(session.id)}
+                    onDelete={() => onDeleteSession(session.id)}
                     formattedTimestamp={formattedTimestamp}
                     fullTimestamp={fullTimestamp}
                   />

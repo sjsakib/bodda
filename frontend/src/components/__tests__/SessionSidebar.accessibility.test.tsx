@@ -35,6 +35,7 @@ describe('SessionSidebar Accessibility and Responsive Design', () => {
     onCreateSession: vi.fn(),
     isCreatingSession: false,
     onSelectSession: vi.fn(),
+    onDeleteSession: vi.fn(),
     isLoading: false,
     error: null
   }

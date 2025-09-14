@@ -59,6 +59,7 @@ export default function ChatInterface() {
   const [messageError, setMessageError] = useState<unknown>(null);
   const [streamingError, setStreamingError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isDeletingSession, setIsDeletingSession] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Responsive layout hook
@@ -321,6 +322,45 @@ export default function ChatInterface() {
     }
   };
 
+  const deleteSession = async (sessionIdToDelete: string) => {
+    setIsDeletingSession(sessionIdToDelete);
+    setSessionError(null);
+
+    try {
+      await apiClient.deleteSession(sessionIdToDelete);
+      
+      // Remove session from local state
+      setSessions(prev => prev.filter(s => s.id !== sessionIdToDelete));
+      
+      // If we're deleting the current session, navigate to another session or create new one
+      if (sessionIdToDelete === sessionId) {
+        const remainingSessions = sessions.filter(s => s.id !== sessionIdToDelete);
+        if (remainingSessions.length > 0) {
+          // Navigate to the most recent remaining session
+          navigate(`/chat/${remainingSessions[0].id}`);
+        } else {
+          // No sessions left, create a new one
+          try {
+            const newSession = await apiClient.createSession();
+            if (newSession && newSession.id) {
+              setSessions([newSession]);
+              navigate(`/chat/${newSession.id}`);
+            }
+          } catch (createError) {
+            console.error('Failed to create new session after deletion:', createError);
+            // Navigate to chat root, which will trigger session creation
+            navigate('/chat');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      setSessionError(error);
+    } finally {
+      setIsDeletingSession(null);
+    }
+  };
+
   // Handle suggestion pill clicks - Requirements 2.1, 2.2, 2.3
   const handlePillClick = (text: string) => {
     setInputText(text);
@@ -352,6 +392,7 @@ export default function ChatInterface() {
           onCreateSession={createNewSession}
           isCreatingSession={isCreatingSession}
           onSelectSession={id => navigate(`/chat/${id}`)}
+          onDeleteSession={deleteSession}
           isLoading={isLoadingSessions}
           error={sessionError}
           onRetryLoad={loadSessions}
@@ -365,6 +406,7 @@ export default function ChatInterface() {
         onCreateSession={createNewSession}
         isCreatingSession={isCreatingSession}
         onSelectSession={id => navigate(`/chat/${id}`)}
+        onDeleteSession={deleteSession}
         isOpen={isMobileMenuOpen}
         onClose={closeMobileMenu}
         isLoading={isLoadingSessions}
